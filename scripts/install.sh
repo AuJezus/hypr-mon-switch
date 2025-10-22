@@ -215,6 +215,39 @@ EOF
   fi
 }
 
+update_udev_rules() {
+  local UDEV_RULE="/etc/udev/rules.d/99-monitor-hotplug.rules"
+  local TARGET_USER="${SUDO_USER:-$(logname 2>/dev/null || echo "${USER:-}")}"
+
+  if [ "$DRY_RUN" = 1 ]; then
+    say "Would write $UDEV_RULE to trigger /etc/acpi/monitor-hotplug-config.sh on hotplug"
+  else
+    if [ -n "$TARGET_USER" ] && [ "$TARGET_USER" != "root" ]; then
+      install -m 0644 -o root -g root /dev/stdin "$UDEV_RULE" <<EOF
+# Monitor hotplug rule for hypr-mon-switch
+# Triggers monitor layout changes when displays are connected/disconnected
+ACTION=="change", SUBSYSTEM=="drm", RUN+="/bin/su $TARGET_USER -c '/etc/acpi/monitor-hotplug-config.sh'"
+EOF
+    else
+      install -m 0644 -o root -g root /dev/stdin "$UDEV_RULE" <<'EOF'
+# Monitor hotplug rule for hypr-mon-switch
+# Triggers monitor layout changes when displays are connected/disconnected
+ACTION=="change", SUBSYSTEM=="drm", RUN+="/etc/acpi/monitor-hotplug-config.sh"
+EOF
+    fi
+  fi
+  
+  # Reload udev rules
+  if command -v udevadm >/dev/null 2>&1; then
+    if [ "$DRY_RUN" = 1 ]; then
+      say "Would reload udev rules"
+    else
+      udevadm control --reload || true
+      udevadm trigger -s drm || true
+    fi
+  fi
+}
+
 post_install() {
   # Ensure log file exists and is writable by both root and user sessions
   if [ "$DRY_RUN" = 1 ]; then
@@ -368,6 +401,7 @@ main() {
   validate_src
   install_system
   update_events
+  update_udev_rules
   post_install
   ensure_hyprland_hooks
   invoke_startup_check
