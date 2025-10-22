@@ -7,23 +7,33 @@ set -euo pipefail
 echo "=== Testing AUR Package Build and Installation ==="
 echo ""
 
-# Change to project directory
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-cd "$SCRIPT_DIR"
+# Create build directory
+BUILD_DIR="$HOME/builds/hypr-mon-switch-test"
+mkdir -p "$BUILD_DIR"
+echo "Building in: $BUILD_DIR"
 
-echo "1. Cleaning previous builds..."
+# Copy project files to build directory (excluding .git)
+echo "1. Copying project files..."
+for item in *; do
+  if [ "$item" != ".git" ] && [ "$item" != "pkg" ] && [ "$item" != "src" ] && [[ ! "$item" =~ \.pkg\.tar\.zst$ ]]; then
+    cp -r "$item" "$BUILD_DIR/"
+  fi
+done
+cd "$BUILD_DIR"
+
+echo "2. Cleaning previous builds..."
 rm -f *.pkg.tar.zst
 rm -rf pkg/ src/
 
-echo "2. Building package..."
+echo "3. Building package..."
 makepkg -f
 
 echo ""
-echo "3. Installing package..."
+echo "4. Installing package..."
 sudo pacman -U --noconfirm hypr-mon-switch-git-*.pkg.tar.zst
 
 echo ""
-echo "4. Testing package installation..."
+echo "5. Testing package installation..."
 
 # Check if files are installed correctly
 echo "Checking installed files:"
@@ -64,11 +74,11 @@ else
 fi
 
 echo ""
-echo "5. Testing setup script..."
+echo "6. Testing setup script..."
 sudo /usr/share/hypr-mon-switch/scripts/install.sh
 
 echo ""
-echo "6. Verifying setup..."
+echo "7. Verifying setup..."
 if [ -f "/etc/udev/rules.d/99-monitor-hotplug.rules" ]; then
     echo "✓ udev rules created"
 else
@@ -82,15 +92,15 @@ else
 fi
 
 echo ""
-echo "7. Testing uninstall script..."
+echo "8. Testing uninstall script..."
 sudo /usr/share/hypr-mon-switch/scripts/uninstall.sh --dry-run
 
 echo ""
-echo "8. Removing package (testing post_remove hook)..."
+echo "9. Removing package (testing post_remove hook)..."
 sudo pacman -R --noconfirm hypr-mon-switch-git
 
 echo ""
-echo "9. Verifying complete removal..."
+echo "10. Verifying complete removal..."
 if [ ! -f "/etc/acpi/hypr-utils.sh" ]; then
     echo "✓ hypr-utils.sh removed"
 else
