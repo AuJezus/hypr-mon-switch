@@ -136,6 +136,61 @@ get_connected_monitors() {
     printf '%s\n' "${monitors[@]}"
 }
 
+# Get list of currently active (enabled) monitors only
+get_active_monitors() {
+    local monitors=()
+    
+    # Get monitors from hyprctl
+    if command -v hyprctl >/dev/null 2>&1; then
+        local hypr_user
+        hypr_user=$(ps -o user= -C Hyprland | head -n1 || true)
+        if [ -n "$hypr_user" ]; then
+            local hypr_output
+            hypr_output=$(sudo -u "$hypr_user" hyprctl monitors 2>/dev/null || true)
+            if [ -n "$hypr_output" ]; then
+                echo "$hypr_output" | awk '
+                    $1=="Monitor" && $2!="(ID" { 
+                        name=$2
+                        disabled=0
+                        desc=""
+                        getline
+                        while (getline && $0 != "") {
+                            if ($1=="disabled:" && $2=="true") {
+                                disabled=1
+                            }
+                            if ($1=="description:") {
+                                desc=$0
+                                sub(/^\s*description: /, "", desc)
+                                sub(/ \(.*/, "", desc)
+                            }
+                        }
+                        if (!disabled && desc != "") {
+                            print name "|" desc
+                        }
+                    }
+                ' | while IFS='|' read -r connector description; do
+                    monitors+=("$connector|$description")
+                done
+            fi
+        fi
+    fi
+    
+    # Fallback to sysfs detection
+    if [ ${#monitors[@]} -eq 0 ]; then
+        for path in /sys/class/drm/card*-*/status; do
+            [ -r "$path" ] || continue
+            if grep -q '^connected' "$path"; then
+                local connector
+                connector=$(basename "$(dirname "$path")")
+                connector="${connector#*-}"
+                monitors+=("$connector|")
+            fi
+        done
+    fi
+    
+    printf '%s\n' "${monitors[@]}"
+}
+
 # Check if a monitor matches the given criteria
 monitor_matches() {
     local monitor_info="$1"
@@ -182,7 +237,7 @@ find_matching_config() {
     current_lid_state=$(get_lid_state)
     
     local connected_monitors
-    mapfile -t connected_monitors < <(get_connected_monitors)
+    mapfile -t connected_monitors < <(get_active_monitors)
     
     log "Current state: lid=$current_lid_state, monitors=${#connected_monitors[@]}"
     
