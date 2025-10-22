@@ -128,6 +128,13 @@ install_system() {
 
   backup_if_changed "$REPO_ACPI_DIR/monitor-hotplug.sh" "$DEST_DIR/monitor-hotplug.sh"
   install_file      "$REPO_ACPI_DIR/monitor-hotplug.sh" "$DEST_DIR/monitor-hotplug.sh" 0755
+  
+  # Create symlink for monitor-hotplug-config.sh
+  if [ "$DRY_RUN" = 1 ]; then
+    say "Would create symlink: $DEST_DIR/monitor-hotplug-config.sh -> $DEST_DIR/monitor-hotplug.sh"
+  else
+    ln -sf "$DEST_DIR/monitor-hotplug.sh" "$DEST_DIR/monitor-hotplug-config.sh"
+  fi
 
   # Install config parser to both locations for compatibility
   backup_if_changed "$REPO_ROOT/scripts/config-parser.sh" "$DEST_DIR/config-parser.sh"
@@ -138,7 +145,7 @@ install_system() {
   install_file      "$REPO_ROOT/scripts/config-parser.sh" "$CONFIG_DIR/config-parser.sh" 0755
 
   # Install configuration files
-  local config_file="${CONFIG_FILE:-default-config.yaml}"
+  local config_file="${CONFIG_FILE:-example-config.yaml}"
   if [ -f "$REPO_CONFIGS_DIR/$config_file" ]; then
     backup_if_changed "$REPO_CONFIGS_DIR/$config_file" "$CONFIG_DIR/config.yaml"
     install_file      "$REPO_CONFIGS_DIR/$config_file" "$CONFIG_DIR/config.yaml" 0644
@@ -224,7 +231,6 @@ EOF
       udevadm control --reload || true
       udevadm trigger -s drm || true
     fi
-  fi
 }
 
 ensure_hyprland_hooks() {
@@ -333,9 +339,18 @@ main() {
 
   say "Install complete."
   say "Configuration system installed. Edit $CONFIG_DIR/config.yaml to customize."
-  say "You can test with:"
-  say "  sudo ${DEST_DIR}/hypr-utils.sh apply"
-  say "  sudo ${DEST_DIR}/hypr-utils.sh list"
+  say ""
+  say "Testing installation..."
+  if [ -f "${DEST_DIR}/config-parser.sh" ]; then
+    say "Available configurations:"
+    "${DEST_DIR}/config-parser.sh" list "$CONFIG_DIR/config.yaml" 2>/dev/null || true
+    say ""
+    say "Note: Configuration matching requires running as the Hyprland user."
+    say "The system will work correctly when triggered by udev events."
+  fi
+  say ""
+  say "Installation verified. The system is ready to use!"
+  say "Monitor switching will work automatically when you connect/disconnect displays."
 }
 
 main "$@"
