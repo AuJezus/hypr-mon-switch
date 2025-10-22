@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -uo pipefail
 
 # Monitor Auto-Switch Installer
 # Installs the configuration-based monitor switching system for Hyprland
@@ -115,7 +115,11 @@ install_file() {
   if [ "$DRY_RUN" = 1 ]; then
     say "Would install $src -> $dest (mode $mode)"
   else
-    install -m "$mode" -o root -g root "$src" "$dest"
+    if install -m "$mode" -o root -g root "$src" "$dest" 2>/dev/null; then
+      say "Installed $src -> $dest"
+    else
+      say "Warning: Failed to install $src -> $dest (file may already exist)"
+    fi
   fi
 }
 
@@ -203,7 +207,12 @@ install_system() {
       [ -f "$config" ] || continue
       local basename_config
       basename_config=$(basename "$config")
-      install_file "$config" "$CONFIG_DIR/$basename_config" 0644
+      # Only install if destination doesn't exist or is different
+      if [ ! -f "$CONFIG_DIR/$basename_config" ] || ! cmp -s "$config" "$CONFIG_DIR/$basename_config"; then
+        install_file "$config" "$CONFIG_DIR/$basename_config" 0644
+      else
+        say "Config file $basename_config already up to date"
+      fi
     done
   else
     say "Running from package installation - config files already installed"
