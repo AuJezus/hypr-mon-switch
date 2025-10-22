@@ -20,7 +20,7 @@ log() {
 }
 
 # Debounce: single instance at a time
-exec 9>/tmp/hypr-mon-switch.lock || true
+exec 9>/var/run/hypr-mon-switch.lock || true
 if command -v flock >/dev/null 2>&1; then
   flock -n 9 || { log "Another monitor switch instance running, exiting."; exit 0; }
 fi
