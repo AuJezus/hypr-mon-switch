@@ -4,54 +4,36 @@ set -euo pipefail
 umask 022
 PATH=/usr/local/bin:/usr/bin:/bin
 
+# Configuration-based hypr-utils for hypr-mon-switch
+# This script uses YAML configuration files to determine monitor layouts
+# instead of hardcoded values.
+
+# Configuration file path (can be overridden by environment variable)
+CONFIG_FILE="${HYPR_MON_CONFIG:-/etc/hypr-mon-switch/config.yaml}"
+
+# Script directory for finding config-parser
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CONFIG_PARSER="${SCRIPT_DIR}/../scripts/config-parser.sh"
+
 log() {
-  logger -t lid-events "[$0] $*"
+  logger -t hypr-mon-switch "[$0] $*"
 }
 
-# ========== CONFIGURATION SECTION ==========
-# Customize these values based on your hardware
-# You can identify monitors by connector names (e.g., DP-1, HDMI-A-1, eDP-1)
-# or by description strings (e.g., "Chimei Innolux Corporation 0x150C").
-# If a *_DESC is provided (non-empty), it will be preferred when applying
-# monitor layouts via hypr keywords. Workspace moves still use connector names.
-LAPTOP_MONITOR="eDP-2"                    # Your laptop display name
-LAPTOP_DESC="BOE 0x0A3A"            # Optional: laptop description (exact, up to before the port in hyprctl)
-EXTERNAL_MONITOR="DP-1"                   # Your external display name
-EXTERNAL_DESC="Samsung Electric Company C24FG7x HTHK700065"        # Optional: first external description
-EXTERNAL_RESOLUTION="1920x1080@60"        # External monitor resolution@refresh
-LAPTOP_RESOLUTION="1920x1200@59.99"          # Laptop monitor resolution@refresh
-EXTERNAL_SCALE="1"                     # External monitor scaling factor
-LAPTOP_SCALE="1.25"                           # Laptop monitor scaling factor
-EXTERNAL_POSITION="0x0"                   # External monitor position
-LAPTOP_POSITION_DUAL="2300x0"            # Laptop position in dual mode
-LAPTOP_POSITION_SOLO="0x0"               # Laptop position when alone
-# Optional: monitor rotation/transform (0=normal, 1=90°, 2=180°, 3=270°, 4=flipped, 5=flipped+90°, 6=flipped+180°, 7=flipped+270°)
-LAPTOP_TRANSFORM="0"
-EXTERNAL_TRANSFORM="${EXTERNAL_TRANSFORM:-0}"
-# Workspace distribution
-EXTERNAL_WS="${EXTERNAL_WS:-1 2 3 4 5}"  # Workspaces for external monitor
-LAPTOP_WS="${LAPTOP_WS:-6 7 8 9 10}"     # Workspaces for laptop monitor
-# Optional: second external monitor settings (used when two externals connected)
-EXTERNAL2_MONITOR="${EXTERNAL2_MONITOR:-}"       # Auto-detected if empty
-EXTERNAL2_DESC="AOC 24G2W1G5 0x0000220C"      # Optional: second external description
-EXTERNAL2_RESOLUTION="${EXTERNAL2_RESOLUTION:-1920x1080@60}"
-EXTERNAL2_SCALE="1"
-EXTERNAL2_POSITION="1920x-420"
-EXTERNAL2_TRANSFORM="1"
-# Workspace distribution for two externals
-EXTERNAL1_WS="${EXTERNAL1_WS:-1 2 3 4 5 6 7}"
-EXTERNAL2_WS="${EXTERNAL2_WS:-8 9 10}"
-# ========== END CONFIGURATION SECTION ==========
-
 # Debounce: single instance at a time
-exec 9>/run/lid-switch.lock || true
+exec 9>/tmp/hypr-mon-switch.lock || true
 if command -v flock >/dev/null 2>&1; then
-  flock -n 9 || { log "Another lid handler instance running, exiting."; exit 0; }
+  flock -n 9 || { log "Another monitor switch instance running, exiting."; exit 0; }
 fi
 
 require_cmd() { command -v "$1" >/dev/null 2>&1 || { log "Missing command: $1"; exit 1; }; }
 require_cmd hyprctl
 require_cmd logger
+
+# Check if config parser is available
+if [ ! -f "$CONFIG_PARSER" ]; then
+  log "Configuration parser not found: $CONFIG_PARSER"
+  exit 1
+fi
 
 get_hypr_user() {
   local u
@@ -137,313 +119,141 @@ hypr() {
   run_as_hypr hyprctl "$@"
 }
 
-monitor_connected_sysfs() {
-  local connector="$1" path
-  for path in /sys/class/drm/card*-"$connector"/status; do
-    [ -r "$path" ] && grep -q '^connected' "$path" && return 0
-  done
-  return 1
-}
-
-monitor_connected_hypr() {
-  local connector="$1"
-  hypr monitors 2>/dev/null | awk -v name="$connector" '$1=="Monitor" && $2==name {found=1} END {exit !found}'
-}
-
-# Returns 0 if a monitor with the given description (up to before the portname)
-# exists in `hyprctl monitors` output.
-monitor_connected_hypr_desc() {
-  local desc="$1"
-  hypr monitors 2>/dev/null | awk -v d="$desc" '
-    $1=="Monitor" && $2!="(ID" {cur=$2}
-    $1=="description:" {
-      line=$0
-      sub(/^\s*description: /, "", line)
-      sub(/ \(.*/, "", line)
-      if (line==d) {found=1}
-    }
-    END {exit !found}
-  '
-}
-
-monitor_connected() {
-  local ident="$1"
-  if printf '%s' "$ident" | grep -q '^desc:'; then
-    local d=${ident#desc:}
-    monitor_connected_hypr_desc "$d"
-  else
-    monitor_connected_sysfs "$ident" || monitor_connected_hypr "$ident"
+# Find and apply the best matching configuration
+apply_best_config() {
+  log "Finding best configuration for current state..."
+  
+  if [ ! -f "$CONFIG_FILE" ]; then
+    log "Configuration file not found: $CONFIG_FILE"
+    log "Please create a configuration file or set HYPR_MON_CONFIG environment variable"
+    return 1
   fi
-}
-
-# Resolve a connector name from a description; prints connector or empty if not found
-connector_from_desc() {
-  local desc="$1"
-  hypr monitors 2>/dev/null | awk -v d="$desc" '
-    $1=="Monitor" {name=$2}
-    $1=="description:" {
-      line=$0
-      sub(/^\s*description: /, "", line)
-      sub(/ \(.*/, "", line)
-      if (line==d) {print name; exit 0}
-    }
-  '
-}
-
-# Return identifier to use in hypr keyword (desc:... if desc provided, else connector)
-monitor_identifier() {
-  local connector="$1"; local desc="$2"
-  if [ -n "$desc" ]; then
-    printf 'desc:%s' "$desc"
-  else
-    printf '%s' "$connector"
+  
+  # Find matching configuration
+  local config_name
+  config_name=$("$CONFIG_PARSER" find "$CONFIG_FILE" 2>/dev/null)
+  
+  if [ -z "$config_name" ]; then
+    log "No matching configuration found for current state"
+    return 1
   fi
-}
-
-detect_external_monitor() {
-  # Keep configured monitor if already connected
-  if [ -n "${EXTERNAL_DESC:-}" ] && monitor_connected "desc:${EXTERNAL_DESC}"; then
-    log "Using configured external by description: ${EXTERNAL_DESC}"
-    # Try to resolve connector for workspace moves
-    local conn
-    conn=$(connector_from_desc "${EXTERNAL_DESC}" || true)
-    if [ -n "$conn" ]; then EXTERNAL_MONITOR="$conn"; export EXTERNAL_MONITOR; fi
-    return 0
+  
+  log "Applying configuration: $config_name"
+  
+  # Apply the configuration
+  local config_commands
+  config_commands=$("$CONFIG_PARSER" apply "$CONFIG_FILE" "$config_name" 2>/dev/null)
+  
+  if [ -z "$config_commands" ]; then
+    log "Failed to generate configuration commands"
+    return 1
   fi
-  if [ -n "${EXTERNAL_MONITOR:-}" ] && monitor_connected "$EXTERNAL_MONITOR"; then
-    log "Using configured external monitor: ${EXTERNAL_MONITOR}"
-    return 0
-  fi
-
-  local path connector
-  for path in /sys/class/drm/card*-DP-*/status; do
-    [ -r "$path" ] || continue
-    if grep -q '^connected' "$path"; then
-      connector=$(basename "$(dirname "$path")")
-      connector="${connector#*-}"
-      EXTERNAL_MONITOR="$connector"
-      export EXTERNAL_MONITOR
-      log "Auto-detected external monitor via sysfs: ${EXTERNAL_MONITOR}"
-      return 0
+  
+  # Execute the configuration commands
+  echo "$config_commands" | while IFS= read -r cmd; do
+    if [ -n "$cmd" ]; then
+      log "Executing: $cmd"
+      eval "$cmd" || log "Warning: Command failed: $cmd"
+      sleep 0.1
     fi
   done
+  
+  # Ensure displays are awake after configuration
+  sleep 0.25
+  hypr dispatch dpms on || true
+  
+  log "Configuration applied successfully: $config_name"
+  return 0
+}
 
-  for path in /sys/class/drm/card*-HDMI-*/status; do
-    [ -r "$path" ] || continue
-    if grep -q '^connected' "$path"; then
-      connector=$(basename "$(dirname "$path")")
-      connector="${connector#*-}"
-      EXTERNAL_MONITOR="$connector"
-      export EXTERNAL_MONITOR
-      log "Auto-detected external monitor via HDMI sysfs: ${EXTERNAL_MONITOR}"
-      return 0
+# Apply a specific configuration by name
+apply_config() {
+  local config_name="$1"
+  
+  if [ -z "$config_name" ]; then
+    log "No configuration name provided"
+    return 1
+  fi
+  
+  if [ ! -f "$CONFIG_FILE" ]; then
+    log "Configuration file not found: $CONFIG_FILE"
+    return 1
+  fi
+  
+  log "Applying specific configuration: $config_name"
+  
+  # Apply the configuration
+  local config_commands
+  config_commands=$("$CONFIG_PARSER" apply "$CONFIG_FILE" "$config_name" 2>/dev/null)
+  
+  if [ -z "$config_commands" ]; then
+    log "Failed to generate configuration commands for: $config_name"
+    return 1
+  fi
+  
+  # Execute the configuration commands
+  echo "$config_commands" | while IFS= read -r cmd; do
+    if [ -n "$cmd" ]; then
+      log "Executing: $cmd"
+      eval "$cmd" || log "Warning: Command failed: $cmd"
+      sleep 0.1
     fi
   done
-
-  local hypr_candidate
-  hypr_candidate=$(hypr monitors 2>/dev/null | awk -v skip="$LAPTOP_MONITOR" '$1=="Monitor" && $2!=skip {print $2; exit}')
-  if [ -n "$hypr_candidate" ]; then
-    EXTERNAL_MONITOR="$hypr_candidate"
-    export EXTERNAL_MONITOR
-    log "Auto-detected external monitor via hyprctl: ${EXTERNAL_MONITOR}"
-    return 0
-  fi
-
-  log "Auto-detect failed: no connected external monitor found."
-  return 1
-}
-
-# Discover two external monitors (names placed into EXTERNAL_MONITOR and EXTERNAL2_MONITOR)
-detect_two_external_monitors() {
-  local found=()
-  local path connector
-
-  # If descriptions are provided for both externals and they are present, resolve connectors and return
-  if [ -n "${EXTERNAL_DESC:-}" ] && [ -n "${EXTERNAL2_DESC:-}" ]; then
-    if monitor_connected "desc:${EXTERNAL_DESC}" && monitor_connected "desc:${EXTERNAL2_DESC}"; then
-      local c1 c2
-      c1=$(connector_from_desc "${EXTERNAL_DESC}" || true)
-      c2=$(connector_from_desc "${EXTERNAL2_DESC}" || true)
-      if [ -n "$c1" ] && [ -n "$c2" ]; then
-        EXTERNAL_MONITOR="$c1"; EXTERNAL2_MONITOR="$c2"
-        export EXTERNAL_MONITOR EXTERNAL2_MONITOR
-        log "Resolved two externals by description: ${EXTERNAL_DESC}=>${EXTERNAL_MONITOR}, ${EXTERNAL2_DESC}=>${EXTERNAL2_MONITOR}"
-        return 0
-      fi
-    fi
-  fi
-
-  # Prefer DP, then HDMI; gather up to two, skipping laptop panel
-  for path in /sys/class/drm/card*-DP-*/status; do
-    [ -r "$path" ] || continue
-    if grep -q '^connected' "$path"; then
-      connector=$(basename "$(dirname "$path")")
-      connector="${connector#*-}"
-      [ "$connector" = "$LAPTOP_MONITOR" ] && continue
-      found+=("$connector")
-    fi
-  done
-
-  if [ "${#found[@]}" -lt 2 ]; then
-    for path in /sys/class/drm/card*-HDMI-*/status; do
-      [ -r "$path" ] || continue
-      if grep -q '^connected' "$path"; then
-        connector=$(basename "$(dirname "$path")")
-        connector="${connector#*-}"
-        [ "$connector" = "$LAPTOP_MONITOR" ] && continue
-        # Avoid duplicates
-        if ! printf '%s\n' "${found[@]}" | grep -qx "$connector"; then
-          found+=("$connector")
-        fi
-      fi
-    done
-  fi
-
-  if [ "${#found[@]}" -ge 2 ]; then
-    EXTERNAL_MONITOR="${found[0]}"
-    EXTERNAL2_MONITOR="${found[1]}"
-    export EXTERNAL_MONITOR EXTERNAL2_MONITOR
-    log "Auto-detected two externals via sysfs: ${EXTERNAL_MONITOR}, ${EXTERNAL2_MONITOR}"
-    return 0
-  fi
-
-  # Fallback to hyprctl monitor list
-  local hypr_list
-  hypr_list=$(hypr monitors 2>/dev/null | awk -v skip="$LAPTOP_MONITOR" '$1=="Monitor" && $2!=skip {print $2}')
-  if [ -n "$hypr_list" ]; then
-    EXTERNAL_MONITOR="$(printf '%s\n' $hypr_list | sed -n '1p')"
-    EXTERNAL2_MONITOR="$(printf '%s\n' $hypr_list | sed -n '2p')"
-  fi
-  if [ -n "${EXTERNAL_MONITOR:-}" ] && [ -n "${EXTERNAL2_MONITOR:-}" ]; then
-    export EXTERNAL_MONITOR EXTERNAL2_MONITOR
-    log "Auto-detected two externals via hyprctl: ${EXTERNAL_MONITOR}, ${EXTERNAL2_MONITOR}"
-    return 0
-  fi
-
-  return 1
-}
-
-two_externals_connected() {
-  # Ensure env contains two external names if available
-  [ -n "${EXTERNAL_MONITOR:-}" ] && [ -n "${EXTERNAL2_MONITOR:-}" ] || detect_two_external_monitors || true
-  if [ -n "${EXTERNAL_MONITOR:-}" ] && [ -n "${EXTERNAL2_MONITOR:-}" ]; then
-    monitor_connected "${EXTERNAL_MONITOR}" && monitor_connected "${EXTERNAL2_MONITOR}"
-    return $?
-  fi
-  return 1
-}
-
-external_connected() {
-  [ -n "${EXTERNAL_MONITOR:-}" ] || detect_external_monitor
-  monitor_connected "${EXTERNAL_MONITOR:-}"
-}
-
-# Retry wrapper: wait for external to enumerate (docks/cables can be slow)
-external_connected_retry() {
-  local attempts="${1:-30}"
-  local delay="${2:-0.15}"
-  local i=0
-  detect_external_monitor || true
-  while [ "$i" -lt "$attempts" ]; do
-    if external_connected; then
-      return 0
-    fi
-    detect_external_monitor || true
-    sleep "$delay"
-    i=$((i+1))
-  done
-  return 1
-}
-
-move_ws_to_monitor() {
-  local dest="$1"
-  shift
-  local ws
-  for ws in "$@"; do
-    hypr dispatch moveworkspacetomonitor "$ws" "$dest" >/dev/null 2>&1 || true
-    sleep 0.05
-  done
-}
-
-set_external_only() {
-  # Enable external and disable laptop using configured values
-  local ident
-  ident=$(monitor_identifier "${EXTERNAL_MONITOR}" "${EXTERNAL_DESC}")
-  if [ "${EXTERNAL_TRANSFORM:-0}" != "0" ]; then
-    hypr keyword monitor "${ident},${EXTERNAL_RESOLUTION},${EXTERNAL_POSITION},${EXTERNAL_SCALE},transform,${EXTERNAL_TRANSFORM}"
-  else
-    hypr keyword monitor "${ident},${EXTERNAL_RESOLUTION},${EXTERNAL_POSITION},${EXTERNAL_SCALE}"
-  fi
+  
+  # Ensure displays are awake after configuration
   sleep 0.25
-  ident=$(monitor_identifier "${LAPTOP_MONITOR}" "${LAPTOP_DESC}")
-  hypr keyword monitor "${ident},disable"
-  sleep 0.25
+  hypr dispatch dpms on || true
+  
+  log "Configuration applied successfully: $config_name"
+  return 0
 }
 
-set_two_externals_only() {
-  # Enable both externals and disable laptop
-  local ident1 ident2 identl
-  ident1=$(monitor_identifier "${EXTERNAL_MONITOR}" "${EXTERNAL_DESC}")
-  ident2=$(monitor_identifier "${EXTERNAL2_MONITOR}" "${EXTERNAL2_DESC}")
-  identl=$(monitor_identifier "${LAPTOP_MONITOR}" "${LAPTOP_DESC}")
-  if [ "${EXTERNAL_TRANSFORM:-0}" != "0" ]; then
-    hypr keyword monitor "${ident1},${EXTERNAL_RESOLUTION},${EXTERNAL_POSITION},${EXTERNAL_SCALE},transform,${EXTERNAL_TRANSFORM}"
-  else
-    hypr keyword monitor "${ident1},${EXTERNAL_RESOLUTION},${EXTERNAL_POSITION},${EXTERNAL_SCALE}"
+# List available configurations
+list_configs() {
+  if [ ! -f "$CONFIG_FILE" ]; then
+    log "Configuration file not found: $CONFIG_FILE"
+    return 1
   fi
-  sleep 0.25
-  if [ "${EXTERNAL2_TRANSFORM:-0}" != "0" ]; then
-    hypr keyword monitor "${ident2},${EXTERNAL2_RESOLUTION},${EXTERNAL2_POSITION},${EXTERNAL2_SCALE},transform,${EXTERNAL2_TRANSFORM}"
-  else
-    hypr keyword monitor "${ident2},${EXTERNAL2_RESOLUTION},${EXTERNAL2_POSITION},${EXTERNAL2_SCALE}"
-  fi
-  sleep 0.25
-  hypr keyword monitor "${identl},disable"
-  sleep 0.25
+  
+  "$CONFIG_PARSER" list "$CONFIG_FILE" 2>/dev/null
 }
 
-set_dual_layout() {
-  # External and laptop both enabled, positions/scales from config
-  local idente identl
-  idente=$(monitor_identifier "${EXTERNAL_MONITOR}" "${EXTERNAL_DESC}")
-  identl=$(monitor_identifier "${LAPTOP_MONITOR}" "${LAPTOP_DESC}")
-  if [ "${EXTERNAL_TRANSFORM:-0}" != "0" ]; then
-    hypr keyword monitor "${idente},${EXTERNAL_RESOLUTION},${EXTERNAL_POSITION},${EXTERNAL_SCALE},transform,${EXTERNAL_TRANSFORM}"
-  else
-    hypr keyword monitor "${idente},${EXTERNAL_RESOLUTION},${EXTERNAL_POSITION},${EXTERNAL_SCALE}"
-  fi
-  sleep 0.25
-  if [ "${LAPTOP_TRANSFORM:-0}" != "0" ]; then
-    hypr keyword monitor "${identl},${LAPTOP_RESOLUTION},${LAPTOP_POSITION_DUAL},${LAPTOP_SCALE},transform,${LAPTOP_TRANSFORM}"
-  else
-    hypr keyword monitor "${identl},${LAPTOP_RESOLUTION},${LAPTOP_POSITION_DUAL},${LAPTOP_SCALE}"
-  fi
-  sleep 0.25
-}
-
-set_laptop_only() {
-  local idente identl
-  idente=$(monitor_identifier "${EXTERNAL_MONITOR}" "${EXTERNAL_DESC}")
-  identl=$(monitor_identifier "${LAPTOP_MONITOR}" "${LAPTOP_DESC}")
-  hypr keyword monitor "${idente},disable"
-  sleep 0.25
-  if [ "${LAPTOP_TRANSFORM:-0}" != "0" ]; then
-    hypr keyword monitor "${identl},${LAPTOP_RESOLUTION},${LAPTOP_POSITION_SOLO},${LAPTOP_SCALE},transform,${LAPTOP_TRANSFORM}"
-  else
-    hypr keyword monitor "${identl},${LAPTOP_RESOLUTION},${LAPTOP_POSITION_SOLO},${LAPTOP_SCALE}"
-  fi
-  sleep 0.25
-}
-
-reassert_primary_external() {
-  sleep 0.60
-  hypr dispatch focusmonitor "${EXTERNAL_MONITOR}"
-  hypr dispatch workspace 1
-  sleep 0.10
-}
-
+# Notify user about display changes
 notify() {
   if command -v notify-send >/dev/null 2>&1; then
     run_as_hypr notify-send "$@"
   fi
 }
+
+# Main function for command-line usage
+main() {
+  local action="${1:-apply}"
+  
+  case "$action" in
+    "apply")
+      if [ $# -gt 1 ]; then
+        apply_config "$2"
+      else
+        apply_best_config
+      fi
+      ;;
+    "list")
+      list_configs
+      ;;
+    "find")
+      "$CONFIG_PARSER" find "$CONFIG_FILE"
+      ;;
+    *)
+      echo "Usage: $0 {apply [config_name]|list|find}" >&2
+      echo "  apply [config_name] - Apply best matching or specific configuration" >&2
+      echo "  list               - List available configurations" >&2
+      echo "  find               - Find best matching configuration" >&2
+      exit 1
+      ;;
+  esac
+}
+
+# If script is run directly, execute main function
+if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+  main "$@"
+fi

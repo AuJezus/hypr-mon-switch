@@ -1,0 +1,113 @@
+# Default configuration for hypr-mon-switch
+# This configuration provides sensible defaults for most laptop setups
+
+global:
+  # Default workspace distribution
+  default_workspaces:
+    external: [1, 2, 3, 4, 5]
+    laptop: [6, 7, 8, 9, 10]
+  
+  # Retry settings for monitor detection
+  detection:
+    max_attempts: 40
+    delay: 0.10
+  
+  # Notification settings
+  notifications:
+    enabled: true
+    timeout: 5000
+
+# Monitor configurations
+# Each configuration defines conditions and the resulting monitor layout
+configurations:
+  # Configuration for when laptop lid is closed and any external monitor is connected
+  - name: "laptop-closed-external"
+    conditions:
+      lid_state: "closed"
+      monitors:
+        - name: "external"
+          # Match any external monitor (not laptop)
+          connector: "!eDP-*"
+    layout:
+      enabled_monitors:
+        - name: "external"
+          # Use auto-detected external monitor
+          connector: "auto"
+          resolution: "1920x1080@60"
+          position: "0x0"
+          scale: 1.0
+          transform: 0
+          workspaces: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+      disabled_monitors:
+        - name: "laptop"
+          connector: "eDP-*"
+
+  # Configuration for dual monitor setup (laptop + external)
+  - name: "dual-laptop-external"
+    conditions:
+      lid_state: "open"
+      monitors:
+        - name: "external"
+          connector: "!eDP-*"
+        - name: "laptop"
+          connector: "eDP-*"
+    layout:
+      enabled_monitors:
+        - name: "external"
+          connector: "auto"
+          resolution: "1920x1080@60"
+          position: "0x0"
+          scale: 1.0
+          transform: 0
+          workspaces: [1, 2, 3, 4, 5]
+        - name: "laptop"
+          connector: "eDP-*"
+          resolution: "1920x1200@59.99"
+          position: "2300x0"
+          scale: 1.25
+          transform: 0
+          workspaces: [6, 7, 8, 9, 10]
+
+  # Configuration for two external monitors (laptop disabled)
+  - name: "dual-external"
+    conditions:
+      monitors:
+        - name: "external1"
+          connector: "!eDP-*"
+        - name: "external2"
+          connector: "!eDP-*"
+    layout:
+      enabled_monitors:
+        - name: "external1"
+          connector: "auto"
+          resolution: "1920x1080@60"
+          position: "0x0"
+          scale: 1.0
+          transform: 0
+          workspaces: [1, 2, 3, 4, 5, 6, 7]
+        - name: "external2"
+          connector: "auto"
+          resolution: "1920x1080@60"
+          position: "1920x0"
+          scale: 1.0
+          transform: 0
+          workspaces: [8, 9, 10]
+      disabled_monitors:
+        - name: "laptop"
+          connector: "eDP-*"
+
+  # Fallback configuration for laptop only
+  - name: "laptop-only"
+    conditions:
+      monitors:
+        - name: "laptop"
+          connector: "eDP-*"
+    layout:
+      enabled_monitors:
+        - name: "laptop"
+          connector: "eDP-*"
+          resolution: "1920x1200@59.99"
+          position: "0x0"
+          scale: 1.25
+          transform: 0
+          workspaces: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
