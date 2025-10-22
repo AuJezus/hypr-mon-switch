@@ -1,5 +1,5 @@
 #!/bin/bash
-set -euo pipefail
+set -uo pipefail
 
 # Configuration-based monitor hotplug handler
 # Reacts to monitor hotplug events and applies the best matching configuration
@@ -30,14 +30,18 @@ get_hypr_env() {
   
   # Get XDG_RUNTIME_DIR from the process environment
   local xdg_runtime_dir
-  xdg_runtime_dir=$(cat /proc/"$pid"/environ | tr '\0' '\n' | awk -F= '$1=="XDG_RUNTIME_DIR"{print $2}')
+  if [ -r "/proc/$pid/environ" ]; then
+    xdg_runtime_dir=$(cat /proc/"$pid"/environ | tr '\0' '\n' | awk -F= '$1=="XDG_RUNTIME_DIR"{print $2}')
+  fi
   if [ -z "$xdg_runtime_dir" ]; then
     xdg_runtime_dir="/run/user/$(id -u "$user")"
   fi
   
   # Get HYPRLAND_INSTANCE_SIGNATURE from the process environment
   local hypr_sig
-  hypr_sig=$(cat /proc/"$pid"/environ | tr '\0' '\n' | awk -F= '$1=="HYPRLAND_INSTANCE_SIGNATURE"{print $2}')
+  if [ -r "/proc/$pid/environ" ]; then
+    hypr_sig=$(cat /proc/"$pid"/environ | tr '\0' '\n' | awk -F= '$1=="HYPRLAND_INSTANCE_SIGNATURE"{print $2}')
+  fi
   
   # If not found, try to find the most recent socket directory
   if [ -z "$hypr_sig" ]; then
@@ -69,6 +73,7 @@ log "Hotplug event: evaluating monitor layout with configuration system."
 
 # Get Hyprland user
 HYPR_USER=$(get_hypr_user)
+log "Detected Hyprland user: $HYPR_USER"
 if [ -z "$HYPR_USER" ]; then
   log "Hyprland not found, exiting."
   exit 0
@@ -76,6 +81,7 @@ fi
 
 # Get Hyprland environment
 HYPR_ENV=$(get_hypr_env "$HYPR_USER")
+log "Hyprland environment: $HYPR_ENV"
 if [ -z "$HYPR_ENV" ]; then
   log "Could not get Hyprland environment for user $HYPR_USER"
   exit 0
@@ -90,17 +96,34 @@ log "Hyprland env: user=$HYPR_USER, XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR, sig=${HYPR
 sleep 0.5
 
 # Run the configuration system as the Hyprland user
-if [ -n "$HYPR_SIG" ]; then
-  if command -v runuser >/dev/null 2>&1; then
-    runuser -u "$HYPR_USER" -- env HYPRLAND_INSTANCE_SIGNATURE="$HYPR_SIG" XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" /etc/acpi/hypr-utils.sh apply
+log "Running as user: $(whoami), target user: $HYPR_USER"
+
+# Check if we're already running as the target user (udev rule runs us as the user)
+if [ "$(whoami)" = "$HYPR_USER" ]; then
+  log "Already running as target user, executing directly"
+  # Already running as the target user, just execute directly
+  if [ -n "$HYPR_SIG" ]; then
+    log "Running with signature: $HYPR_SIG"
+    env HYPR_USER="$HYPR_USER" HYPRLAND_INSTANCE_SIGNATURE="$HYPR_SIG" XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" /etc/acpi/hypr-utils.sh apply
   else
-    sudo -u "$HYPR_USER" env HYPRLAND_INSTANCE_SIGNATURE="$HYPR_SIG" XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" /etc/acpi/hypr-utils.sh apply
+    log "Running without signature"
+    env HYPR_USER="$HYPR_USER" XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" /etc/acpi/hypr-utils.sh apply
   fi
 else
-  if command -v runuser >/dev/null 2>&1; then
-    runuser -u "$HYPR_USER" -- env XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" /etc/acpi/hypr-utils.sh apply
+  log "Need to switch to user $HYPR_USER"
+  # Need to switch user (this shouldn't happen with udev rule)
+  if [ -n "$HYPR_SIG" ]; then
+    if command -v runuser >/dev/null 2>&1; then
+      runuser -u "$HYPR_USER" -- env HYPRLAND_INSTANCE_SIGNATURE="$HYPR_SIG" XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" /etc/acpi/hypr-utils.sh apply
+    else
+      sudo -u "$HYPR_USER" env HYPRLAND_INSTANCE_SIGNATURE="$HYPR_SIG" XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" /etc/acpi/hypr-utils.sh apply
+    fi
   else
-    sudo -u "$HYPR_USER" env XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" /etc/acpi/hypr-utils.sh apply
+    if command -v runuser >/dev/null 2>&1; then
+      runuser -u "$HYPR_USER" -- env XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" /etc/acpi/hypr-utils.sh apply
+    else
+      sudo -u "$HYPR_USER" env XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" /etc/acpi/hypr-utils.sh apply
+    fi
   fi
 fi
 

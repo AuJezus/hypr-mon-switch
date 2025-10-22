@@ -1,5 +1,5 @@
 #!/bin/bash
-set -euo pipefail
+set -uo pipefail
 
 umask 022
 PATH=/usr/local/bin:/usr/bin:/bin
@@ -125,18 +125,29 @@ export_hypr_env() {
 }
 
 run_as_hypr() {
-  if [ -n "$HYPR_SIG" ]; then
-    if command -v runuser >/dev/null 2>&1; then
-      runuser -u "$HYPR_USER" -- env HYPRLAND_INSTANCE_SIGNATURE="$HYPR_SIG" XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" "$@"
+  # Check if we're already running as the target user
+  if [ "$(whoami)" = "${HYPR_USER:-}" ]; then
+    # Already running as the target user, execute directly
+    if [ -n "${HYPR_SIG:-}" ]; then
+      env HYPRLAND_INSTANCE_SIGNATURE="$HYPR_SIG" XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-}" "$@"
     else
-      sudo -u "$HYPR_USER" env HYPRLAND_INSTANCE_SIGNATURE="$HYPR_SIG" XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" "$@"
+      env XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-}" "$@"
     fi
   else
-    # Try without HYPR_SIG, let hyprctl auto-detect
-    if command -v runuser >/dev/null 2>&1; then
-      runuser -u "$HYPR_USER" -- env XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" "$@"
+    # Need to switch user
+    if [ -n "${HYPR_SIG:-}" ]; then
+      if command -v runuser >/dev/null 2>&1; then
+        runuser -u "${HYPR_USER:-}" -- env HYPRLAND_INSTANCE_SIGNATURE="$HYPR_SIG" XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-}" "$@"
+      else
+        sudo -u "${HYPR_USER:-}" env HYPRLAND_INSTANCE_SIGNATURE="$HYPR_SIG" XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-}" "$@"
+      fi
     else
-      sudo -u "$HYPR_USER" env XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" "$@"
+      # Try without HYPR_SIG, let hyprctl auto-detect
+      if command -v runuser >/dev/null 2>&1; then
+        runuser -u "${HYPR_USER:-}" -- env XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-}" "$@"
+      else
+        sudo -u "${HYPR_USER:-}" env XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-}" "$@"
+      fi
     fi
   fi
 }
