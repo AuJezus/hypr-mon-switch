@@ -16,12 +16,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 
 # Check if we're running from development directory or installed system
-if [ -f "${REPO_ROOT}/scripts/config-parser.sh" ]; then
+if [ -f "/etc/acpi/config-parser.sh" ]; then
+  # Installed system
+  CONFIG_PARSER="/etc/acpi/config-parser.sh"
+elif [ -f "${REPO_ROOT}/scripts/config-parser.sh" ]; then
   # Development directory
   CONFIG_PARSER="${REPO_ROOT}/scripts/config-parser.sh"
-elif [ -f "/etc/hypr-mon-switch/config-parser.sh" ]; then
-  # Installed system
-  CONFIG_PARSER="/etc/hypr-mon-switch/config-parser.sh"
 else
   # Fallback to development directory
   CONFIG_PARSER="${REPO_ROOT}/scripts/config-parser.sh"

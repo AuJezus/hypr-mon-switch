@@ -1,3 +1,4 @@
 # Monitor hotplug rule for hypr-mon-switch
 # Triggers monitor layout changes when displays are connected/disconnected
+# Note: The install script will automatically replace USERNAME with the actual user
 ACTION=="change", SUBSYSTEM=="drm", RUN+="/etc/acpi/monitor-hotplug-config.sh"

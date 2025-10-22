@@ -129,9 +129,13 @@ install_system() {
   backup_if_changed "$REPO_ACPI_DIR/monitor-hotplug.sh" "$DEST_DIR/monitor-hotplug.sh"
   install_file      "$REPO_ACPI_DIR/monitor-hotplug.sh" "$DEST_DIR/monitor-hotplug.sh" 0755
 
-  # Install config parser
+  # Install config parser to both locations for compatibility
   backup_if_changed "$REPO_ROOT/scripts/config-parser.sh" "$DEST_DIR/config-parser.sh"
   install_file      "$REPO_ROOT/scripts/config-parser.sh" "$DEST_DIR/config-parser.sh" 0755
+  
+  # Also install to config directory for hypr-utils.sh compatibility
+  backup_if_changed "$REPO_ROOT/scripts/config-parser.sh" "$CONFIG_DIR/config-parser.sh"
+  install_file      "$REPO_ROOT/scripts/config-parser.sh" "$CONFIG_DIR/config-parser.sh" 0755
 
   # Install configuration files
   local config_file="${CONFIG_FILE:-default-config.yaml}"
@@ -196,12 +200,25 @@ post_install() {
 
   # Install udev rule for DRM hotplug events
   local UDEV_RULE="/etc/udev/rules.d/99-monitor-hotplug.rules"
+  local TARGET_USER="${SUDO_USER:-$(logname 2>/dev/null || echo "${USER:-}")}"
+  
   if [ "$DRY_RUN" = 1 ]; then
-    say "Would write $UDEV_RULE to trigger /etc/acpi/monitor-hotplug.sh on hotplug"
+    say "Would write $UDEV_RULE to trigger /etc/acpi/monitor-hotplug-config.sh on hotplug"
   else
-    install -m 0644 -o root -g root /dev/stdin "$UDEV_RULE" <<'EOF'
-ACTION=="change", SUBSYSTEM=="drm", RUN+="/etc/acpi/monitor-hotplug.sh"
+    if [ -n "$TARGET_USER" ] && [ "$TARGET_USER" != "root" ]; then
+      install -m 0644 -o root -g root /dev/stdin "$UDEV_RULE" <<EOF
+# Monitor hotplug rule for hypr-mon-switch
+# Triggers monitor layout changes when displays are connected/disconnected
+ACTION=="change", SUBSYSTEM=="drm", RUN+="/bin/su $TARGET_USER -c '/etc/acpi/monitor-hotplug-config.sh'"
 EOF
+    else
+      install -m 0644 -o root -g root /dev/stdin "$UDEV_RULE" <<'EOF'
+# Monitor hotplug rule for hypr-mon-switch
+# Triggers monitor layout changes when displays are connected/disconnected
+ACTION=="change", SUBSYSTEM=="drm", RUN+="/etc/acpi/monitor-hotplug-config.sh"
+EOF
+    fi
+  fi
     # Reload udev rules
     if command -v udevadm >/dev/null 2>&1; then
       udevadm control --reload || true
