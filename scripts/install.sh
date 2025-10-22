@@ -9,7 +9,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 
 # Detect if running from package installation
-if [ -d "/usr/share/hypr-mon-switch" ] && [ -f "/etc/acpi/hypr-utils.sh" ]; then
+if [ -d "/usr/share/hypr-mon-switch" ] && [ -f "/etc/acpi/hypr-utils.sh" ] && [ -f "/etc/acpi/config-parser.sh" ]; then
   # Running from package installation
   REPO_ACPI_DIR="/etc/acpi"
   REPO_CONFIGS_DIR="/etc/hypr-mon-switch"
@@ -346,8 +346,8 @@ validate_src() {
       missing=1
     fi
   done
-  if [ ! -f "$REPO_ROOT/scripts/config-parser.sh" ]; then
-    echo "Missing: $REPO_ROOT/scripts/config-parser.sh" >&2
+  if [ ! -f "$REPO_ACPI_DIR/config-parser.sh" ]; then
+    echo "Missing: $REPO_ACPI_DIR/config-parser.sh" >&2
     missing=1
   fi
   if [ "$missing" = 1 ]; then
