@@ -189,13 +189,17 @@ install_system() {
     fi
   fi
 
-  # Install all example configs
-  for config in "$REPO_CONFIGS_DIR"/*.yaml; do
-    [ -f "$config" ] || continue
-    local basename_config
-    basename_config=$(basename "$config")
-    install_file "$config" "$CONFIG_DIR/$basename_config" 0644
-  done
+  # Install all example configs (only if source directory exists)
+  if [ -d "$REPO_CONFIGS_DIR" ]; then
+    for config in "$REPO_CONFIGS_DIR"/*.yaml; do
+      [ -f "$config" ] || continue
+      local basename_config
+      basename_config=$(basename "$config")
+      install_file "$config" "$CONFIG_DIR/$basename_config" 0644
+    done
+  else
+    say "Source config directory not found, skipping additional config installation"
+  fi
 }
 
 update_events() {
