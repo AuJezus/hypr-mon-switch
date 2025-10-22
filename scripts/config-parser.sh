@@ -100,7 +100,7 @@ get_connected_monitors() {
         hypr_user=$(ps -o user= -C Hyprland | head -n1 || true)
         if [ -n "$hypr_user" ]; then
             local hypr_output
-            hypr_output=$(sudo -u "$hypr_user" hyprctl monitors 2>/dev/null || true)
+            hypr_output=$(sudo -E -u "$hypr_user" hyprctl monitors 2>/dev/null || true)
             if [ -n "$hypr_output" ]; then
                 echo "$hypr_output" | awk '
                     $1=="Monitor" && $2!="(ID" { 
@@ -146,7 +146,7 @@ get_active_monitors() {
         hypr_user=$(ps -o user= -C Hyprland | head -n1 || true)
         if [ -n "$hypr_user" ]; then
             local hypr_output
-            hypr_output=$(sudo -u "$hypr_user" hyprctl monitors 2>/dev/null || true)
+            hypr_output=$(sudo -E -u "$hypr_user" hyprctl monitors 2>/dev/null || true)
             if [ -n "$hypr_output" ]; then
                 echo "$hypr_output" | awk '
                     $1=="Monitor" && $2!="(ID" { 
