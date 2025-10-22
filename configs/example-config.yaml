@@ -3,11 +3,6 @@
 
 # Global settings
 global:
-  # Default workspace distribution
-  default_workspaces:
-    external: [1, 2, 3, 4, 5]
-    laptop: [6, 7, 8, 9, 10]
-  
   # Retry settings for monitor detection
   detection:
     max_attempts: 40
@@ -21,129 +16,52 @@ global:
 # Monitor configurations
 # Each configuration defines conditions and the resulting monitor layout
 configurations:
-  # Configuration for when laptop lid is closed and Samsung monitor is connected
-  - name: "laptop-closed-samsung"
-    conditions:
-      lid_state: "closed"
-      monitors:
-        - name: "Samsung"
-          description: "Samsung Electric Company C24FG7x"
-          connector: "DP-1"
-    layout:
-      enabled_monitors:
-        - name: "Samsung"
-          description: "Samsung Electric Company C24FG7x"
-          connector: "DP-1"
-          resolution: "1920x1080@60"
-          position: "0x0"
-          scale: 1.0
-          transform: 0
-          workspaces: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-      disabled_monitors:
-        - name: "laptop"
-          description: "BOE 0x0A3A"
-          connector: "eDP-2"
-
-  # Configuration for when laptop lid is closed and Asus monitor is connected
-  - name: "laptop-closed-asus"
-    conditions:
-      lid_state: "closed"
-      monitors:
-        - name: "Asus"
-          description: "ASUS VG248QE"
-          connector: "HDMI-A-1"
-    layout:
-      enabled_monitors:
-        - name: "Asus"
-          description: "ASUS VG248QE"
-          connector: "HDMI-A-1"
-          resolution: "1920x1080@144"
-          position: "0x0"
-          scale: 1.0
-          transform: 0
-          workspaces: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-      disabled_monitors:
-        - name: "laptop"
-          description: "BOE 0x0A3A"
-          connector: "eDP-2"
-
   # Configuration for dual monitor setup (laptop + external)
-  - name: "dual-samsung-laptop"
+  - name: "laptop-external"
     conditions:
       lid_state: "open"
       monitors:
         - name: "Samsung"
-          description: "Samsung Electric Company C24FG7x"
-          connector: "DP-1"
+          connector: "desc:Samsung Electric Company C24FG7x HTHK700065"
         - name: "laptop"
-          description: "BOE 0x0A3A"
-          connector: "eDP-2"
+          connector: "desc:BOE 0x0A3A"
     layout:
       enabled_monitors:
         - name: "Samsung"
-          description: "Samsung Electric Company C24FG7x"
-          connector: "DP-1"
           resolution: "1920x1080@60"
           position: "0x0"
           scale: 1.0
           transform: 0
           workspaces: [1, 2, 3, 4, 5]
         - name: "laptop"
-          description: "BOE 0x0A3A"
-          connector: "eDP-2"
-          resolution: "1920x1200@59.99"
-          position: "2300x0"
-          scale: 1.25
+          resolution: "1920x1200@60"
+          position: "1920x0"
+          scale: 1
           transform: 0
           workspaces: [6, 7, 8, 9, 10]
 
   # Configuration for two external monitors (laptop disabled)
-  - name: "dual-external-samsung-asus"
+  - name: "dual-external"
     conditions:
+    # if not lif specified it can be either open or closed
       monitors:
         - name: "Samsung"
-          description: "Samsung Electric Company C24FG7x"
-          connector: "DP-1"
-        - name: "Asus"
-          description: "ASUS VG248QE"
-          connector: "HDMI-A-1"
+          connector: "desc:Samsung Electric Company C24FG7x HTHK700065"
+        - name: "AOC"
+          connector: "desc:AOC 24G2W1G5 0x0000220C"
     layout:
       enabled_monitors:
         - name: "Samsung"
-          description: "Samsung Electric Company C24FG7x"
-          connector: "DP-1"
           resolution: "1920x1080@60"
           position: "0x0"
           scale: 1.0
           transform: 0
           workspaces: [1, 2, 3, 4, 5, 6, 7]
-        - name: "Asus"
-          description: "ASUS VG248QE"
-          connector: "HDMI-A-1"
-          resolution: "1920x1080@144"
+        - name: "AOC"
+          resolution: "1920x1080@60"
           position: "1920x-420"
           scale: 1.0
           transform: 1
           workspaces: [8, 9, 10]
       disabled_monitors:
-        - name: "laptop"
-          description: "BOE 0x0A3A"
-          connector: "eDP-2"
-
-  # Fallback configuration for laptop only
-  - name: "laptop-only"
-    conditions:
-      monitors:
-        - name: "laptop"
-          description: "BOE 0x0A3A"
-          connector: "eDP-2"
-    layout:
-      enabled_monitors:
-        - name: "laptop"
-          description: "BOE 0x0A3A"
-          connector: "eDP-2"
-          resolution: "1920x1200@59.99"
-          position: "0x0"
-          scale: 1.25
-          transform: 0
-          workspaces: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        - connector: "desc:BOE 0x0A3A"

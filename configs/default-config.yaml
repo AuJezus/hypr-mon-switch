@@ -2,11 +2,6 @@
 # This configuration provides sensible defaults for most laptop setups
 
 global:
-  # Default workspace distribution
-  default_workspaces:
-    external: [1, 2, 3, 4, 5]
-    laptop: [6, 7, 8, 9, 10]
-  
   # Retry settings for monitor detection
   detection:
     max_attempts: 40
@@ -39,8 +34,7 @@ configurations:
           transform: 0
           workspaces: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
       disabled_monitors:
-        - name: "laptop"
-          connector: "eDP-*"
+        - connector: "eDP-*"
 
   # Configuration for dual monitor setup (laptop + external)
   - name: "dual-laptop-external"
@@ -93,8 +87,7 @@ configurations:
           transform: 0
           workspaces: [8, 9, 10]
       disabled_monitors:
-        - name: "laptop"
-          connector: "eDP-*"
+        - connector: "eDP-*"
 
   # Fallback configuration for laptop only
   - name: "laptop-only"

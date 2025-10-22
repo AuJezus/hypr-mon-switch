@@ -94,28 +94,38 @@ get_lid_state() {
 get_connected_monitors() {
     local monitors=()
     
-    # Get monitors from hyprctl
+    # Get monitors from hyprctl (all monitors, including disabled)
     if command -v hyprctl >/dev/null 2>&1; then
         local hypr_user
         hypr_user=$(ps -o user= -C Hyprland | head -n1 || true)
         if [ -n "$hypr_user" ]; then
             local hypr_output
-            hypr_output=$(sudo -E -u "$hypr_user" hyprctl monitors 2>/dev/null || true)
+            hypr_output=$(sudo -E -u "$hypr_user" hyprctl monitors all 2>/dev/null || true)
             if [ -n "$hypr_output" ]; then
-                echo "$hypr_output" | awk '
-                    $1=="Monitor" && $2!="(ID" { 
-                        name=$2
-                        getline
-                        if ($1=="description:") {
-                            desc=$0
-                            sub(/^\s*description: /, "", desc)
-                            sub(/ \(.*/, "", desc)
-                            print name "|" desc
-                        }
-                    }
-                ' | while IFS='|' read -r connector description; do
+                # Extract monitor info using a simpler approach
+                local temp_file="/tmp/hypr_monitors_$$"
+                echo "$hypr_output" | grep -A 20 "Monitor.*(" | while read -r line; do
+                    if [[ "$line" =~ ^Monitor[[:space:]]+([^[:space:]]+)[[:space:]]+\(ID ]]; then
+                        connector="${BASH_REMATCH[1]}"
+                        # Look for description in the next few lines
+                        for i in {1..10}; do
+                            read -r desc_line || break
+                            if [[ "$desc_line" =~ ^[[:space:]]*description:[[:space:]]+(.+) ]]; then
+                                description="${BASH_REMATCH[1]}"
+                                # Remove any parenthetical info
+                                description="${description% (*}"
+                                echo "$connector|$description"
+                                break
+                            fi
+                        done
+                    fi
+                done > "$temp_file"
+                
+                # Read the results into the array
+                while IFS='|' read -r connector description; do
                     monitors+=("$connector|$description")
-                done
+                done < "$temp_file"
+                rm -f "$temp_file"
             fi
         fi
     fi
@@ -140,13 +150,13 @@ get_connected_monitors() {
 get_active_monitors() {
     local monitors=()
     
-    # Get monitors from hyprctl
+    # Get monitors from hyprctl (all monitors, then filter for active ones)
     if command -v hyprctl >/dev/null 2>&1; then
         local hypr_user
         hypr_user=$(ps -o user= -C Hyprland | head -n1 || true)
         if [ -n "$hypr_user" ]; then
             local hypr_output
-            hypr_output=$(sudo -E -u "$hypr_user" hyprctl monitors 2>/dev/null || true)
+            hypr_output=$(sudo -E -u "$hypr_user" hyprctl monitors all 2>/dev/null || true)
             if [ -n "$hypr_output" ]; then
                 while IFS='|' read -r connector description; do
                     monitors+=("$connector|$description")
@@ -201,9 +211,15 @@ monitor_matches() {
     local connector description
     IFS='|' read -r connector description <<< "$monitor_info"
     
-    # Match by connector if provided (supports patterns like !eDP-*)
+    # Match by connector if provided (supports patterns like !eDP-* and desc:monitor)
     if [ -n "$target_connector" ]; then
-        if [[ "$target_connector" =~ ^! ]]; then
+        if [[ "$target_connector" =~ ^desc: ]]; then
+            # Match by description: desc:monitor_name
+            local desc_pattern="${target_connector#desc:}"
+            if [ -n "$description" ] && echo "$description" | grep -qi "$desc_pattern"; then
+                return 0
+            fi
+        elif [[ "$target_connector" =~ ^! ]]; then
             # Negative pattern: match if connector does NOT match the pattern after !
             local pattern="${target_connector#!}"
             # Convert * wildcards to .* for regex
@@ -254,7 +270,7 @@ find_matching_config() {
     current_lid_state=$(get_lid_state)
     
     local connected_monitors
-    mapfile -t connected_monitors < <(get_active_monitors)
+    mapfile -t connected_monitors < <(get_connected_monitors)
     
     log "Current state: lid=$current_lid_state, monitors=${#connected_monitors[@]}"
     
@@ -266,7 +282,11 @@ find_matching_config() {
         config_count=$(yq '.configurations | length' "$YAML_PARSED_FILE" 2>/dev/null || echo "0")
     fi
     
-    # Check each configuration
+    log "Found $config_count configurations to check"
+    # Check each configuration and find the best match
+    local best_match=""
+    local best_match_count=0
+    
     for ((i=0; i<config_count; i++)); do
         local config_name
         if [ "$major_version" -ge 4 ]; then
@@ -275,53 +295,106 @@ find_matching_config() {
             config_name=$(yq ".configurations[$i].name" "$YAML_PARSED_FILE" 2>/dev/null)
         fi
         
-        # Check lid state condition
+        log "Checking configuration $i: $config_name"
+        
+        # Check lid state condition (optional)
         local required_lid_state
         if [ "$major_version" -ge 4 ]; then
             required_lid_state=$(yq eval ".configurations[$i].conditions.lid_state // \"\"" "$YAML_PARSED_FILE" 2>/dev/null)
         else
-            required_lid_state=$(yq ".configurations[$i].conditions.lid_state // \"\"" "$YAML_PARSED_FILE" 2>/dev/null)
+            required_lid_state=$(yq ".configurations[$i].conditions.lid_state // \"\"" "$YAML_PARSED_FILE" 2>/dev/null || echo "")
         fi
+        # Remove quotes from yq output
+        required_lid_state=$(echo "$required_lid_state" | sed 's/^"//;s/"$//')
         if [ -n "$required_lid_state" ] && [ "$current_lid_state" != "$required_lid_state" ]; then
+            log "Skipping $config_name due to lid state mismatch"
             continue
         fi
         
-        # Check monitor conditions
-        local required_monitors
+        # Check monitor conditions (enabled monitors)
+        local required_monitors=()
         if [ "$major_version" -ge 4 ]; then
-            mapfile -t required_monitors < <(yq eval ".configurations[$i].conditions.monitors[]? | .name + \"|\" + (.description // \"\") + \"|\" + (.connector // \"\")" "$YAML_PARSED_FILE" 2>/dev/null || true)
+            mapfile -t required_monitors < <(yq eval ".configurations[$i].conditions.monitors[]? | .name + \"|\" + (.connector // \"\")" "$YAML_PARSED_FILE" 2>/dev/null || true)
         else
-            mapfile -t required_monitors < <(yq ".configurations[$i].conditions.monitors[]? | .name + \"|\" + (.description // \"\") + \"|\" + (.connector // \"\")" "$YAML_PARSED_FILE" 2>/dev/null || true)
+            # For yq v3, we need to use a different approach
+            local names=()
+            local connectors=()
+            mapfile -t names < <(yq ".configurations[$i].conditions.monitors[].name" "$YAML_PARSED_FILE" 2>/dev/null || true)
+            mapfile -t connectors < <(yq ".configurations[$i].conditions.monitors[].connector" "$YAML_PARSED_FILE" 2>/dev/null || true)
+            for j in "${!names[@]}"; do
+                required_monitors+=("${names[j]}|${connectors[j]}")
+            done
         fi
         
+        # Check disabled monitors (they should also be connected)
+        local disabled_monitors=()
+        if [ "$major_version" -ge 4 ]; then
+            mapfile -t disabled_monitors < <(yq eval ".configurations[$i].layout.disabled_monitors[]? | .connector" "$YAML_PARSED_FILE" 2>/dev/null || true)
+        else
+            mapfile -t disabled_monitors < <(yq ".configurations[$i].layout.disabled_monitors[].connector" "$YAML_PARSED_FILE" 2>/dev/null || true)
+        fi
+        
+        # Combine enabled and disabled monitors for connection check
+        local all_required_monitors=("${required_monitors[@]}")
+        for disabled_monitor in "${disabled_monitors[@]}"; do
+            # Remove quotes from disabled monitor connector
+            disabled_monitor=$(echo "$disabled_monitor" | sed 's/^"//;s/"$//')
+            all_required_monitors+=("disabled|$disabled_monitor")
+        done
+        
+        log "Checking config $config_name: enabled_monitors=${#required_monitors[@]}, disabled_monitors=${#disabled_monitors[@]}, total_required=${#all_required_monitors[@]}, connected_monitors=${#connected_monitors[@]}"
+        log "Required monitors: ${required_monitors[*]}"
+        log "Disabled monitors: ${disabled_monitors[*]}"
+        log "All required monitors: ${all_required_monitors[*]}"
+        
         local all_monitors_match=true
-        for required_monitor in "${required_monitors[@]}"; do
-            local name desc connector
-            IFS='|' read -r name desc connector <<< "$required_monitor"
+        for required_monitor in "${all_required_monitors[@]}"; do
+            local name connector
+            IFS='|' read -r name connector <<< "$required_monitor"
+            # Remove quotes from name and connector
+            name=$(echo "$name" | sed 's/^"//;s/"$//')
+            connector=$(echo "$connector" | sed 's/^"//;s/"$//')
+            
+            log "  Required: name='$name', connector='$connector'"
             
             local monitor_found=false
             for connected_monitor in "${connected_monitors[@]}"; do
-                if monitor_matches "$connected_monitor" "$name" "$desc" "$connector"; then
+                log "    Checking against: $connected_monitor"
+                if monitor_matches "$connected_monitor" "$name" "" "$connector"; then
+                    log "    MATCH FOUND!"
                     monitor_found=true
                     break
                 fi
             done
             
             if [ "$monitor_found" = false ]; then
+                log "  No match found for required monitor: $name ($connector)"
                 all_monitors_match=false
                 break
             fi
         done
         
         if [ "$all_monitors_match" = true ]; then
-            log "Found matching configuration: $config_name"
-            echo "$config_name"
-            return 0
+            local total_required=${#all_required_monitors[@]}
+            log "Found matching configuration: $config_name (requires $total_required monitors)"
+            
+            # Prefer configurations that require more monitors (more specific)
+            if [ "$total_required" -gt "$best_match_count" ]; then
+                best_match="$config_name"
+                best_match_count=$total_required
+                log "New best match: $config_name (requires $total_required monitors)"
+            fi
         fi
     done
     
-    log "No matching configuration found"
-    return 1
+    if [ -n "$best_match" ]; then
+        log "Selected best matching configuration: $best_match (requires $best_match_count monitors)"
+        echo "$best_match"
+        return 0
+    else
+        log "No matching configuration found"
+        return 1
+    fi
 }
 
 # Apply a specific configuration
@@ -333,14 +406,30 @@ apply_config() {
         return 1
     fi
     
+    # Get yq version for compatibility
+    local yq_version
+    yq_version=$(yq --version 2>&1 | grep -o '[0-9]\+\.[0-9]\+' | head -1)
+    local major_version
+    major_version=$(echo "$yq_version" | cut -d. -f1)
+    
     # Find the configuration index
     local config_count
-    config_count=$(yq eval '.configurations | length' "$YAML_PARSED_FILE" 2>/dev/null || echo "0")
+    if [ "$major_version" -ge 4 ]; then
+        config_count=$(yq eval '.configurations | length' "$YAML_PARSED_FILE" 2>/dev/null || echo "0")
+    else
+        config_count=$(yq '.configurations | length' "$YAML_PARSED_FILE" 2>/dev/null || echo "0")
+    fi
     
     local config_index=-1
     for ((i=0; i<config_count; i++)); do
         local name
-        name=$(yq eval ".configurations[$i].name" "$YAML_PARSED_FILE" 2>/dev/null)
+        if [ "$major_version" -ge 4 ]; then
+            name=$(yq eval ".configurations[$i].name" "$YAML_PARSED_FILE" 2>/dev/null)
+        else
+            name=$(yq ".configurations[$i].name" "$YAML_PARSED_FILE" 2>/dev/null)
+        fi
+        # Remove quotes from name if present
+        name=$(echo "$name" | sed 's/^"//;s/"$//')
         if [ "$name" = "$config_name" ]; then
             config_index=$i
             break
@@ -356,27 +445,57 @@ apply_config() {
     
     # Apply enabled monitors
     local enabled_count
-    enabled_count=$(yq eval ".configurations[$config_index].layout.enabled_monitors | length" "$YAML_PARSED_FILE" 2>/dev/null || echo "0")
+    if [ "$major_version" -ge 4 ]; then
+        enabled_count=$(yq eval ".configurations[$config_index].layout.enabled_monitors | length" "$YAML_PARSED_FILE" 2>/dev/null || echo "0")
+    else
+        enabled_count=$(yq ".configurations[$config_index].layout.enabled_monitors | length" "$YAML_PARSED_FILE" 2>/dev/null || echo "0")
+    fi
     
     for ((i=0; i<enabled_count; i++)); do
-        local monitor_name monitor_desc monitor_connector monitor_resolution monitor_position monitor_scale monitor_transform monitor_workspaces
+        local monitor_name monitor_resolution monitor_position monitor_scale monitor_transform monitor_workspaces
         
-        monitor_name=$(yq eval ".configurations[$config_index].layout.enabled_monitors[$i].name" "$YAML_PARSED_FILE" 2>/dev/null)
-        monitor_desc=$(yq eval ".configurations[$config_index].layout.enabled_monitors[$i].description // \"\"" "$YAML_PARSED_FILE" 2>/dev/null)
-        monitor_connector=$(yq eval ".configurations[$config_index].layout.enabled_monitors[$i].connector" "$YAML_PARSED_FILE" 2>/dev/null)
-        monitor_resolution=$(yq eval ".configurations[$config_index].layout.enabled_monitors[$i].resolution" "$YAML_PARSED_FILE" 2>/dev/null)
-        monitor_position=$(yq eval ".configurations[$config_index].layout.enabled_monitors[$i].position" "$YAML_PARSED_FILE" 2>/dev/null)
-        monitor_scale=$(yq eval ".configurations[$config_index].layout.enabled_monitors[$i].scale" "$YAML_PARSED_FILE" 2>/dev/null)
-        monitor_transform=$(yq eval ".configurations[$config_index].layout.enabled_monitors[$i].transform // 0" "$YAML_PARSED_FILE" 2>/dev/null)
-        monitor_workspaces=$(yq eval ".configurations[$config_index].layout.enabled_monitors[$i].workspaces[]?" "$YAML_PARSED_FILE" 2>/dev/null || true)
-        
-        # Build monitor identifier
-        local monitor_ident
-        if [ -n "$monitor_desc" ]; then
-            monitor_ident="desc:$monitor_desc"
+        if [ "$major_version" -ge 4 ]; then
+            monitor_name=$(yq eval ".configurations[$config_index].layout.enabled_monitors[$i].name" "$YAML_PARSED_FILE" 2>/dev/null)
+            monitor_resolution=$(yq eval ".configurations[$config_index].layout.enabled_monitors[$i].resolution" "$YAML_PARSED_FILE" 2>/dev/null)
+            monitor_position=$(yq eval ".configurations[$config_index].layout.enabled_monitors[$i].position" "$YAML_PARSED_FILE" 2>/dev/null)
+            monitor_scale=$(yq eval ".configurations[$config_index].layout.enabled_monitors[$i].scale" "$YAML_PARSED_FILE" 2>/dev/null)
+            monitor_transform=$(yq eval ".configurations[$config_index].layout.enabled_monitors[$i].transform // 0" "$YAML_PARSED_FILE" 2>/dev/null)
+            mapfile -t monitor_workspaces < <(yq eval ".configurations[$config_index].layout.enabled_monitors[$i].workspaces[]?" "$YAML_PARSED_FILE" 2>/dev/null || true)
         else
-            monitor_ident="$monitor_connector"
+            monitor_name=$(yq ".configurations[$config_index].layout.enabled_monitors[$i].name" "$YAML_PARSED_FILE" 2>/dev/null)
+            monitor_resolution=$(yq ".configurations[$config_index].layout.enabled_monitors[$i].resolution" "$YAML_PARSED_FILE" 2>/dev/null)
+            monitor_position=$(yq ".configurations[$config_index].layout.enabled_monitors[$i].position" "$YAML_PARSED_FILE" 2>/dev/null)
+            monitor_scale=$(yq ".configurations[$config_index].layout.enabled_monitors[$i].scale" "$YAML_PARSED_FILE" 2>/dev/null)
+            monitor_transform=$(yq ".configurations[$config_index].layout.enabled_monitors[$i].transform // 0" "$YAML_PARSED_FILE" 2>/dev/null)
+            mapfile -t monitor_workspaces < <(yq ".configurations[$config_index].layout.enabled_monitors[$i].workspaces[]?" "$YAML_PARSED_FILE" 2>/dev/null || true)
         fi
+        
+        # Remove quotes from monitor name if present
+        monitor_name=$(echo "$monitor_name" | sed 's/^"//;s/"$//')
+        
+        # Find the corresponding connector from conditions
+        local monitor_connector=""
+        local conditions_monitors
+        if [ "$major_version" -ge 4 ]; then
+            mapfile -t conditions_monitors < <(yq eval ".configurations[$config_index].conditions.monitors[]? | .name + \"|\" + (.connector // \"\")" "$YAML_PARSED_FILE" 2>/dev/null || true)
+        else
+            mapfile -t conditions_monitors < <(yq ".configurations[$config_index].conditions.monitors[]? | .name + \"|\" + (.connector // \"\")" "$YAML_PARSED_FILE" 2>/dev/null || true)
+        fi
+        
+        for condition_monitor in "${conditions_monitors[@]}"; do
+            local cond_name cond_connector
+            IFS='|' read -r cond_name cond_connector <<< "$condition_monitor"
+            # Remove quotes from name and connector if present
+            cond_name=$(echo "$cond_name" | sed 's/^"//;s/"$//')
+            cond_connector=$(echo "$cond_connector" | sed 's/^"//;s/"$//')
+            if [ "$cond_name" = "$monitor_name" ]; then
+                monitor_connector="$cond_connector"
+                break
+            fi
+        done
+        
+        # Use the connector as-is (it can be port name or desc:monitor)
+        local monitor_ident="$monitor_connector"
         
         # Apply monitor configuration
         local hypr_cmd="monitor $monitor_ident,$monitor_resolution,$monitor_position,$monitor_scale"
@@ -388,35 +507,33 @@ apply_config() {
         echo "hyprctl keyword $hypr_cmd"
         
         # Move workspaces if specified
-        if [ -n "$monitor_workspaces" ]; then
-            echo "$monitor_workspaces" | while read -r workspace; do
-                if [ -n "$workspace" ]; then
-                    log "Moving workspace $workspace to $monitor_connector"
-                    echo "hyprctl dispatch moveworkspacetomonitor $workspace $monitor_connector"
-                fi
-            done
-        fi
+        for workspace in "${monitor_workspaces[@]}"; do
+            if [ -n "$workspace" ]; then
+                log "Assigning workspace $workspace to $monitor_ident"
+                echo "hyprctl keyword workspace $workspace,monitor:$monitor_ident"
+            fi
+        done
     done
     
     # Disable monitors
     local disabled_count
-    disabled_count=$(yq eval ".configurations[$config_index].layout.disabled_monitors | length" "$YAML_PARSED_FILE" 2>/dev/null || echo "0")
+    if [ "$major_version" -ge 4 ]; then
+        disabled_count=$(yq eval ".configurations[$config_index].layout.disabled_monitors | length" "$YAML_PARSED_FILE" 2>/dev/null || echo "0")
+    else
+        disabled_count=$(yq ".configurations[$config_index].layout.disabled_monitors | length" "$YAML_PARSED_FILE" 2>/dev/null || echo "0")
+    fi
     
     for ((i=0; i<disabled_count; i++)); do
-        local monitor_desc monitor_connector
+        local monitor_connector
         
-        monitor_desc=$(yq eval ".configurations[$config_index].layout.disabled_monitors[$i].description // \"\"" "$YAML_PARSED_FILE" 2>/dev/null)
-        monitor_connector=$(yq eval ".configurations[$config_index].layout.disabled_monitors[$i].connector" "$YAML_PARSED_FILE" 2>/dev/null)
-        
-        local monitor_ident
-        if [ -n "$monitor_desc" ]; then
-            monitor_ident="desc:$monitor_desc"
+        if [ "$major_version" -ge 4 ]; then
+            monitor_connector=$(yq eval ".configurations[$config_index].layout.disabled_monitors[$i].connector" "$YAML_PARSED_FILE" 2>/dev/null)
         else
-            monitor_ident="$monitor_connector"
+            monitor_connector=$(yq ".configurations[$config_index].layout.disabled_monitors[$i].connector" "$YAML_PARSED_FILE" 2>/dev/null)
         fi
         
-        log "Disabling monitor: $monitor_connector ($monitor_ident)"
-        echo "hyprctl keyword monitor $monitor_ident,disable"
+        log "Disabling monitor: $monitor_connector"
+        echo "hyprctl keyword monitor $monitor_connector,disable"
     done
     
     return 0
@@ -433,11 +550,12 @@ main() {
             ;;
         "apply")
             local config_name="$2"
+            local apply_config_file="${3:-$CONFIG_FILE}"
             if [ -z "$config_name" ]; then
                 echo "Usage: $0 apply <config_name> [config_file]" >&2
                 exit 1
             fi
-            apply_config "$config_file" "$config_name"
+            apply_config "$apply_config_file" "$config_name"
             ;;
         "list")
             if ! parse_config "$config_file"; then

@@ -13,16 +13,27 @@ CONFIG_FILE="${HYPR_MON_CONFIG:-/etc/hypr-mon-switch/config.yaml}"
 
 # Script directory for finding config-parser
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CONFIG_PARSER="${SCRIPT_DIR}/config-parser.sh"
+REPO_ROOT="$(dirname "$SCRIPT_DIR")"
+CONFIG_PARSER="${REPO_ROOT}/scripts/config-parser.sh"
 
 log() {
   logger -t hypr-mon-switch "[$0] $*"
 }
 
 # Debounce: single instance at a time
-exec 9>/var/run/hypr-mon-switch.lock || true
-if command -v flock >/dev/null 2>&1; then
-  flock -n 9 || { log "Another monitor switch instance running, exiting."; exit 0; }
+LOCK_FILE="/var/run/hypr-mon-switch.lock"
+if [ -w "/var/run" ]; then
+  exec 9>"$LOCK_FILE" || true
+  if command -v flock >/dev/null 2>&1; then
+    flock -n 9 || { log "Another monitor switch instance running, exiting."; exit 0; }
+  fi
+else
+  # Fallback to temp directory if /var/run is not writable
+  LOCK_FILE="/tmp/hypr-mon-switch.lock"
+  exec 9>"$LOCK_FILE" || true
+  if command -v flock >/dev/null 2>&1; then
+    flock -n 9 || { log "Another monitor switch instance running, exiting."; exit 0; }
+  fi
 fi
 
 require_cmd() { command -v "$1" >/dev/null 2>&1 || { log "Missing command: $1"; exit 1; }; }

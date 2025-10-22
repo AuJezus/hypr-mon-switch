@@ -128,13 +128,10 @@ EOF
     conditions:
       monitors:
         - name: "laptop"
-          description: "$laptop_desc"
-          connector: "$laptop_connector"
+          connector: "desc:$laptop_desc"
     layout:
       enabled_monitors:
         - name: "laptop"
-          description: "$laptop_desc"
-          connector: "$laptop_connector"
           resolution: "1920x1200@59.99"
           position: "0x0"
           scale: 1.25
@@ -162,22 +159,17 @@ EOF
       lid_state: "closed"
       monitors:
         - name: "external$external_count"
-          description: "$external_desc"
-          connector: "$external_connector"
+          connector: "desc:$external_desc"
     layout:
       enabled_monitors:
         - name: "external$external_count"
-          description: "$external_desc"
-          connector: "$external_connector"
           resolution: "1920x1080@60"
           position: "0x0"
           scale: 1.0
           transform: 0
           workspaces: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
       disabled_monitors:
-        - name: "laptop"
-          description: "$laptop_desc"
-          connector: "$laptop_connector"
+        - connector: "desc:$laptop_desc"
 EOF
 
         # Dual monitor configuration
@@ -190,24 +182,18 @@ EOF
       lid_state: "open"
       monitors:
         - name: "external$external_count"
-          description: "$external_desc"
-          connector: "$external_connector"
+          connector: "desc:$external_desc"
         - name: "laptop"
-          description: "$laptop_desc"
-          connector: "$laptop_connector"
+          connector: "desc:$laptop_desc"
     layout:
       enabled_monitors:
         - name: "external$external_count"
-          description: "$external_desc"
-          connector: "$external_connector"
           resolution: "1920x1080@60"
           position: "0x0"
           scale: 1.0
           transform: 0
           workspaces: [1, 2, 3, 4, 5]
         - name: "laptop"
-          description: "$laptop_desc"
-          connector: "$laptop_connector"
           resolution: "1920x1200@59.99"
           position: "2300x0"
           scale: 1.25
@@ -234,33 +220,25 @@ EOF
     conditions:
       monitors:
         - name: "external1"
-          description: "$ext1_desc"
-          connector: "$ext1_connector"
+          connector: "desc:$ext1_desc"
         - name: "external2"
-          description: "$ext2_desc"
-          connector: "$ext2_connector"
+          connector: "desc:$ext2_desc"
     layout:
       enabled_monitors:
         - name: "external1"
-          description: "$ext1_desc"
-          connector: "$ext1_connector"
           resolution: "1920x1080@60"
           position: "0x0"
           scale: 1.0
           transform: 0
           workspaces: [1, 2, 3, 4, 5, 6, 7]
         - name: "external2"
-          description: "$ext2_desc"
-          connector: "$ext2_connector"
           resolution: "1920x1080@60"
           position: "1920x0"
           scale: 1.0
           transform: 0
           workspaces: [8, 9, 10]
       disabled_monitors:
-        - name: "laptop"
-          description: "$laptop_desc"
-          connector: "$laptop_connector"
+        - connector: "desc:$laptop_desc"
 EOF
     fi
 }
