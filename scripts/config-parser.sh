@@ -148,7 +148,9 @@ get_active_monitors() {
             local hypr_output
             hypr_output=$(sudo -E -u "$hypr_user" hyprctl monitors 2>/dev/null || true)
             if [ -n "$hypr_output" ]; then
-                echo "$hypr_output" | awk '
+                while IFS='|' read -r connector description; do
+                    monitors+=("$connector|$description")
+                done < <(echo "$hypr_output" | awk '
                     $1=="Monitor" && $2!="(ID" { 
                         name=$2
                         disabled=0
@@ -168,9 +170,7 @@ get_active_monitors() {
                             print name "|" desc
                         }
                     }
-                ' | while IFS='|' read -r connector description; do
-                    monitors+=("$connector|$description")
-                done
+                ')
             fi
         fi
     fi
