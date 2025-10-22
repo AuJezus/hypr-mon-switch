@@ -15,11 +15,23 @@ A configuration-based monitor switching system for Hyprland that automatically a
 
 ## Installation
 
-### Quick Install
+### AUR Installation (Recommended)
+
+```bash
+# Install from AUR
+yay -S hypr-mon-switch-git
+# or
+paru -S hypr-mon-switch-git
+
+# Complete setup after package installation
+sudo /usr/share/hypr-mon-switch/scripts/install.sh
+```
+
+### Manual Installation
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/hypr-mon-switch.git
+git clone https://github.com/aujezus/hypr-mon-switch.git
 cd hypr-mon-switch
 
 # Install with default configuration
@@ -27,6 +39,18 @@ sudo ./scripts/install.sh
 
 # Or install with a specific configuration
 sudo ./scripts/install.sh --config example-config.yaml
+```
+
+### Uninstallation
+
+```bash
+# If installed from AUR
+yay -R hypr-mon-switch-git
+# or
+paru -R hypr-mon-switch-git
+
+# Manual uninstall
+sudo /usr/share/hypr-mon-switch/scripts/uninstall.sh
 ```
 
 ## Configuration

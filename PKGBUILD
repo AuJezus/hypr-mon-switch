@@ -1,6 +1,6 @@
 # Maintainer: Augustas Vaivada <https://github.com/aujezus>
 pkgname=hypr-mon-switch-git
-pkgver=r5.28e3fd9
+pkgver=r13.5ee8b6c
 pkgrel=1
 pkgdesc="Configuration-based monitor switching system for Hyprland with YAML configuration support"
 arch=('any')
@@ -27,13 +27,17 @@ package() {
     # Install ACPI scripts to system location
     install -Dm755 acpi/hypr-utils.sh "$pkgdir/etc/acpi/hypr-utils.sh"
     install -Dm755 acpi/monitor-hotplug.sh "$pkgdir/etc/acpi/monitor-hotplug.sh"
+    install -Dm755 acpi/lid-open.sh "$pkgdir/etc/acpi/lid-open.sh"
+    install -Dm755 acpi/lid-close.sh "$pkgdir/etc/acpi/lid-close.sh"
     install -Dm755 acpi/check-lid-on-startup.sh "$pkgdir/etc/acpi/check-lid-on-startup.sh"
     
-    # Install config parser to correct system location
+    # Install config parser to both locations for compatibility
+    install -Dm755 scripts/config-parser.sh "$pkgdir/etc/acpi/config-parser.sh"
     install -Dm755 scripts/config-parser.sh "$pkgdir/etc/hypr-mon-switch/config-parser.sh"
     
     # Install utility scripts to /usr/share for user access
     install -Dm755 scripts/install.sh "$pkgdir/usr/share/hypr-mon-switch/scripts/install.sh"
+    install -Dm755 scripts/uninstall.sh "$pkgdir/usr/share/hypr-mon-switch/scripts/uninstall.sh"
     install -Dm755 scripts/generate-config.sh "$pkgdir/usr/share/hypr-mon-switch/scripts/generate-config.sh"
     install -Dm755 scripts/test-config.sh "$pkgdir/usr/share/hypr-mon-switch/scripts/test-config.sh"
     
@@ -41,27 +45,20 @@ package() {
     install -Dm755 simple-test.sh "$pkgdir/usr/share/hypr-mon-switch/simple-test.sh"
     
     # Install configuration files to system location
-    install -Dm644 configs/default-config.yaml "$pkgdir/etc/hypr-mon-switch/config.yaml"
+    install -Dm644 configs/example-config.yaml "$pkgdir/etc/hypr-mon-switch/config.yaml"
     install -Dm644 configs/example-config.yaml "$pkgdir/etc/hypr-mon-switch/example-config.yaml"
+    install -Dm644 configs/default-config.yaml "$pkgdir/etc/hypr-mon-switch/default-config.yaml"
     
     # Install documentation
     install -Dm644 README.md "$pkgdir/usr/share/doc/hypr-mon-switch/README.md"
     install -Dm644 INSTALLATION.md "$pkgdir/usr/share/doc/hypr-mon-switch/INSTALLATION.md"
     install -Dm644 LICENSE "$pkgdir/usr/share/licenses/hypr-mon-switch-git/LICENSE"
     
-    # Install systemd service file
-    install -Dm644 hypr-mon-switch.service "$pkgdir/usr/lib/systemd/system/hypr-mon-switch.service"
-    
-    # Install udev rules
-    install -Dm644 udev/99-monitor-hotplug.rules "$pkgdir/usr/lib/udev/rules.d/99-monitor-hotplug.rules"
+    # Install udev rules template
+    install -Dm644 udev/99-monitor-hotplug.rules "$pkgdir/usr/share/hypr-mon-switch/udev/99-monitor-hotplug.rules"
 }
 
 post_install() {
-    echo "Enabling services..."
-    systemctl daemon-reload
-    udevadm control --reload
-    udevadm trigger -s drm
-    
     echo ""
     echo "hypr-mon-switch-git has been installed!"
     echo ""
@@ -69,10 +66,46 @@ post_install() {
     echo "Example config: /etc/hypr-mon-switch/example-config.yaml"
     echo "Documentation: /usr/share/doc/hypr-mon-switch/INSTALLATION.md"
     echo ""
-    echo "Quick start:"
-    echo "  Test: sudo /etc/acpi/hypr-utils.sh apply"
-    echo "  Generate config: /usr/share/hypr-mon-switch/scripts/generate-config.sh"
-    echo "  Manual test: /usr/share/hypr-mon-switch/simple-test.sh"
+    echo "To complete setup, run:"
+    echo "  sudo /usr/share/hypr-mon-switch/scripts/install.sh"
+    echo ""
+    echo "To uninstall completely:"
+    echo "  sudo /usr/share/hypr-mon-switch/scripts/uninstall.sh"
     echo ""
     echo "The system will automatically detect monitor changes and apply the best matching configuration."
+}
+
+post_remove() {
+    echo ""
+    echo "Removing hypr-mon-switch-git files..."
+    
+    # Remove files that were created during installation
+    rm -f /etc/udev/rules.d/99-monitor-hotplug.rules
+    rm -f /etc/acpi/events/lid-open
+    rm -f /etc/acpi/events/lid-close
+    rm -f /var/log/hypr-mon-switch.log
+    
+    # Remove symlinks and scripts that may have been created
+    rm -f /etc/acpi/monitor-hotplug-config.sh
+    rm -f /etc/acpi/lid-open.sh
+    rm -f /etc/acpi/lid-close.sh
+    rm -f /etc/acpi/check-lid-on-startup.sh
+    rm -f /etc/acpi/config-parser.sh
+    rm -f /etc/acpi/hypr-utils.sh
+    rm -f /etc/acpi/monitor-hotplug.sh
+    
+    # Remove configuration directory
+    rm -rf /etc/hypr-mon-switch
+    
+    # Reload udev rules
+    if command -v udevadm >/dev/null 2>&1; then
+        udevadm control --reload-rules 2>/dev/null || true
+    fi
+    
+    echo "hypr-mon-switch-git has been completely removed."
+    echo ""
+    echo "Note: Hyprland hooks in user config files were not automatically removed."
+    echo "You may need to manually remove these lines from your Hyprland config:"
+    echo "  exec-once = /etc/acpi/check-lid-on-startup.sh"
+    echo "  exec = /etc/acpi/check-lid-on-startup.sh"
 }
