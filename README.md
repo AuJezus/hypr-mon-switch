@@ -2,6 +2,12 @@
 
 A configuration-based monitor switching system for Hyprland that automatically adjusts monitor layouts based on lid state and connected displays.
 
+## Todo
+
+- [ ] Add support for monitor connectors like eDP-*
+- [ ] Make the switching faster
+- [ ] Refactor code
+
 ## Features
 
 - **Configuration-based**: Define monitor layouts using YAML configuration files
