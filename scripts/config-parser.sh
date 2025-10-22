@@ -201,9 +201,26 @@ monitor_matches() {
     local connector description
     IFS='|' read -r connector description <<< "$monitor_info"
     
-    # Match by connector if provided
-    if [ -n "$target_connector" ] && [ "$connector" = "$target_connector" ]; then
-        return 0
+    # Match by connector if provided (supports patterns like !eDP-*)
+    if [ -n "$target_connector" ]; then
+        if [[ "$target_connector" =~ ^! ]]; then
+            # Negative pattern: match if connector does NOT match the pattern after !
+            local pattern="${target_connector#!}"
+            # Convert * wildcards to .* for regex
+            pattern="${pattern//\*/.*}"
+            if [[ ! "$connector" =~ $pattern ]]; then
+                return 0
+            fi
+        else
+            # Positive pattern: exact match or wildcard match
+            if [[ "$target_connector" == *"*" ]]; then
+                if [[ "$connector" =~ ${target_connector//\*/.*} ]]; then
+                    return 0
+                fi
+            elif [ "$connector" = "$target_connector" ]; then
+                return 0
+            fi
+        fi
     fi
     
     # Match by description if provided
