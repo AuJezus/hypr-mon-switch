@@ -14,7 +14,18 @@ CONFIG_FILE="${HYPR_MON_CONFIG:-/etc/hypr-mon-switch/config.yaml}"
 # Script directory for finding config-parser
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
-CONFIG_PARSER="${REPO_ROOT}/scripts/config-parser.sh"
+
+# Check if we're running from development directory or installed system
+if [ -f "${REPO_ROOT}/scripts/config-parser.sh" ]; then
+  # Development directory
+  CONFIG_PARSER="${REPO_ROOT}/scripts/config-parser.sh"
+elif [ -f "/etc/hypr-mon-switch/config-parser.sh" ]; then
+  # Installed system
+  CONFIG_PARSER="/etc/hypr-mon-switch/config-parser.sh"
+else
+  # Fallback to development directory
+  CONFIG_PARSER="${REPO_ROOT}/scripts/config-parser.sh"
+fi
 
 log() {
   logger -t hypr-mon-switch "[$0] $*"
@@ -41,10 +52,14 @@ require_cmd hyprctl
 require_cmd logger
 
 # Check if config parser is available
+log "Looking for config parser at: $CONFIG_PARSER"
 if [ ! -f "$CONFIG_PARSER" ]; then
   log "Configuration parser not found: $CONFIG_PARSER"
+  log "Script directory: $SCRIPT_DIR"
+  log "Repo root: $REPO_ROOT"
   exit 1
 fi
+log "Configuration parser found: $CONFIG_PARSER"
 
 get_hypr_user() {
   local u
@@ -152,8 +167,16 @@ apply_best_config() {
   log "Applying configuration: $config_name"
   
   # Apply the configuration
+  log "Calling config parser: $CONFIG_PARSER apply $config_name"
   local config_commands
-  config_commands=$("$CONFIG_PARSER" apply "$CONFIG_FILE" "$config_name" 2>/dev/null)
+  config_commands=$("$CONFIG_PARSER" apply "$config_name" 2>/dev/null)
+  local exit_code=$?
+  
+  if [ $exit_code -ne 0 ]; then
+    log "Config parser failed with exit code $exit_code"
+    log "Config parser output: $config_commands"
+    return 1
+  fi
   
   if [ -z "$config_commands" ]; then
     log "Failed to generate configuration commands"
@@ -195,7 +218,7 @@ apply_config() {
   
   # Apply the configuration
   local config_commands
-  config_commands=$("$CONFIG_PARSER" apply "$CONFIG_FILE" "$config_name" 2>/dev/null)
+  config_commands=$("$CONFIG_PARSER" apply "$config_name" 2>/dev/null)
   
   if [ -z "$config_commands" ]; then
     log "Failed to generate configuration commands for: $config_name"

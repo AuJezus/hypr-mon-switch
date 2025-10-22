@@ -5,7 +5,14 @@ set -euo pipefail
 # Reacts to monitor hotplug events and applies the best matching configuration
 
 sleep 0.3
-. /etc/acpi/hypr-utils.sh || exit 0
+# Source hypr-utils.sh from the same directory as this script
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "${SCRIPT_DIR}/hypr-utils.sh" || exit 0
+
+# Set the config file to the development version if we're running from development
+if [ -f "${SCRIPT_DIR}/../configs/example-config.yaml" ]; then
+  export HYPR_MON_CONFIG="${SCRIPT_DIR}/../configs/example-config.yaml"
+fi
 log "Hotplug event: evaluating monitor layout with configuration system."
 
 if ! export_hypr_env; then

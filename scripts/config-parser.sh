@@ -294,6 +294,8 @@ find_matching_config() {
         else
             config_name=$(yq ".configurations[$i].name" "$YAML_PARSED_FILE" 2>/dev/null)
         fi
+        # Remove quotes from config name
+        config_name=$(echo "$config_name" | sed 's/^"//;s/"$//')
         
         log "Checking configuration $i: $config_name"
         
