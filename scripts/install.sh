@@ -158,39 +158,47 @@ install_system() {
     fi
   fi
 
-  # Install config parser to both locations for compatibility
+  # Install config parser to both locations for compatibility (only if source exists)
   if [ -f "$DEST_DIR/config-parser.sh" ]; then
     say "Config parser already installed in $DEST_DIR"
   else
-    backup_if_changed "$REPO_ROOT/scripts/config-parser.sh" "$DEST_DIR/config-parser.sh"
-    install_file      "$REPO_ROOT/scripts/config-parser.sh" "$DEST_DIR/config-parser.sh" 0755
+    if [ -f "$REPO_ROOT/scripts/config-parser.sh" ]; then
+      backup_if_changed "$REPO_ROOT/scripts/config-parser.sh" "$DEST_DIR/config-parser.sh"
+      install_file      "$REPO_ROOT/scripts/config-parser.sh" "$DEST_DIR/config-parser.sh" 0755
+    else
+      say "Config parser source not found, skipping installation"
+    fi
   fi
   
   # Also install to config directory for hypr-utils.sh compatibility
   if [ -f "$CONFIG_DIR/config-parser.sh" ]; then
     say "Config parser already installed in $CONFIG_DIR"
   else
-    backup_if_changed "$REPO_ROOT/scripts/config-parser.sh" "$CONFIG_DIR/config-parser.sh"
-    install_file      "$REPO_ROOT/scripts/config-parser.sh" "$CONFIG_DIR/config-parser.sh" 0755
-  fi
-
-  # Install configuration files
-  if [ -f "$CONFIG_DIR/config.yaml" ]; then
-    say "Configuration file already installed in $CONFIG_DIR"
-  else
-    local config_file="${CONFIG_FILE:-example-config.yaml}"
-    if [ -f "$REPO_CONFIGS_DIR/$config_file" ]; then
-      backup_if_changed "$REPO_CONFIGS_DIR/$config_file" "$CONFIG_DIR/config.yaml"
-      install_file      "$REPO_CONFIGS_DIR/$config_file" "$CONFIG_DIR/config.yaml" 0644
+    if [ -f "$REPO_ROOT/scripts/config-parser.sh" ]; then
+      backup_if_changed "$REPO_ROOT/scripts/config-parser.sh" "$CONFIG_DIR/config-parser.sh"
+      install_file      "$REPO_ROOT/scripts/config-parser.sh" "$CONFIG_DIR/config-parser.sh" 0755
     else
-      say "Warning: Configuration file $config_file not found in $REPO_CONFIGS_DIR"
-      say "Available configs:"
-      ls -1 "$REPO_CONFIGS_DIR"/*.yaml 2>/dev/null || say "  (none found)"
+      say "Config parser source not found, skipping installation"
     fi
   fi
 
-  # Install all example configs (only if source directory exists)
+  # Install configuration files (only if source directory exists)
   if [ -d "$REPO_CONFIGS_DIR" ]; then
+    if [ -f "$CONFIG_DIR/config.yaml" ]; then
+      say "Configuration file already installed in $CONFIG_DIR"
+    else
+      local config_file="${CONFIG_FILE:-example-config.yaml}"
+      if [ -f "$REPO_CONFIGS_DIR/$config_file" ]; then
+        backup_if_changed "$REPO_CONFIGS_DIR/$config_file" "$CONFIG_DIR/config.yaml"
+        install_file      "$REPO_CONFIGS_DIR/$config_file" "$CONFIG_DIR/config.yaml" 0644
+      else
+        say "Warning: Configuration file $config_file not found in $REPO_CONFIGS_DIR"
+        say "Available configs:"
+        ls -1 "$REPO_CONFIGS_DIR"/*.yaml 2>/dev/null || say "  (none found)"
+      fi
+    fi
+
+    # Install all example configs
     for config in "$REPO_CONFIGS_DIR"/*.yaml; do
       [ -f "$config" ] || continue
       local basename_config
@@ -198,11 +206,12 @@ install_system() {
       install_file "$config" "$CONFIG_DIR/$basename_config" 0644
     done
   else
-    say "Source config directory not found, skipping additional config installation"
+    say "Running from package installation - config files already installed"
   fi
 }
 
 update_events() {
+  say "Creating ACPI events..."
   if [ "$DRY_RUN" = 1 ]; then
     say "Would write $EVENTS_DIR/lid-close with event"
     say "Would write $EVENTS_DIR/lid-open with event"
@@ -215,10 +224,12 @@ EOF
 event=button/lid.*open
 action=/etc/acpi/lid-open.sh
 EOF
+    say "ACPI events created successfully"
   fi
 }
 
 update_udev_rules() {
+  say "Creating udev rules..."
   local UDEV_RULE="/etc/udev/rules.d/99-monitor-hotplug.rules"
   local TARGET_USER="${SUDO_USER:-$(logname 2>/dev/null || echo "${USER:-}")}"
 
@@ -238,6 +249,7 @@ EOF
 ACTION=="change", SUBSYSTEM=="drm", RUN+="/etc/acpi/monitor-hotplug-config.sh"
 EOF
     fi
+    say "Udev rules created successfully"
   fi
   
   # Reload udev rules
@@ -247,6 +259,7 @@ EOF
     else
       udevadm control --reload || true
       udevadm trigger -s drm || true
+      say "Udev rules reloaded"
     fi
   fi
 }
@@ -401,12 +414,19 @@ main() {
     need_sudo
   fi
 
+  say "Starting installation process..."
   validate_src
+  say "Installing system files..."
   install_system
+  say "Creating ACPI events..."
   update_events
+  say "Creating udev rules..."
   update_udev_rules
+  say "Running post-install setup..."
   post_install
+  say "Setting up Hyprland hooks..."
   ensure_hyprland_hooks
+  say "Running startup check..."
   invoke_startup_check
 
   say "Install complete."
