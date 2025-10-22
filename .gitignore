@@ -1,0 +1,37 @@
+# AUR package files
+*.pkg.tar.zst
+*.pkg.tar.xz
+*.pkg.tar.gz
+*.pkg.tar.bz2
+*.pkg.tar.lz4
+*.pkg.tar.zst.sig
+*.pkg.tar.xz.sig
+*.pkg.tar.gz.sig
+*.pkg.tar.bz2.sig
+*.pkg.tar.lz4.sig
+
+# Temporary files
+*.tmp
+*.temp
+/tmp/
+
+# Lock files
+*.lock
+
+# Log files
+*.log
+
+# Backup files
+*.backup
+*.bak
+*~
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
