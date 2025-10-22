@@ -13,7 +13,7 @@ CONFIG_FILE="${HYPR_MON_CONFIG:-/etc/hypr-mon-switch/config.yaml}"
 
 # Script directory for finding config-parser
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CONFIG_PARSER="${SCRIPT_DIR}/../scripts/config-parser.sh"
+CONFIG_PARSER="${SCRIPT_DIR}/config-parser.sh"
 
 log() {
   logger -t hypr-mon-switch "[$0] $*"
