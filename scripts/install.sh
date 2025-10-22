@@ -133,6 +133,7 @@ install_system() {
         ln -sf "$DEST_DIR/monitor-hotplug.sh" "$DEST_DIR/monitor-hotplug-config.sh"
       fi
     fi
+    # Continue with the rest of the setup process even when files are already installed
   else
     # Running from development directory - install ACPI scripts
     backup_if_changed "$REPO_ACPI_DIR/hypr-utils.sh" "$DEST_DIR/hypr-utils.sh"
