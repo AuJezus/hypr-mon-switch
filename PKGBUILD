@@ -79,33 +79,25 @@ post_install() {
 
 post_remove() {
     echo ""
-    echo "Removing hypr-mon-switch-git files..."
+    echo "Removing hypr-mon-switch-git system integration..."
     
-    # Remove files that were created during installation
+    # Remove files that were created by the install script (not package files)
     rm -f /etc/udev/rules.d/99-monitor-hotplug.rules
     rm -f /etc/acpi/events/lid-open
     rm -f /etc/acpi/events/lid-close
     rm -f /var/log/hypr-mon-switch.log
     
-    # Remove symlinks and scripts that may have been created
+    # Remove symlinks that were created by the install script
     rm -f /etc/acpi/monitor-hotplug-config.sh
-    rm -f /etc/acpi/lid-open.sh
-    rm -f /etc/acpi/lid-close.sh
-    rm -f /etc/acpi/check-lid-on-startup.sh
-    rm -f /etc/acpi/config-parser.sh
-    rm -f /etc/acpi/hypr-utils.sh
-    rm -f /etc/acpi/monitor-hotplug.sh
-    
-    # Remove configuration directory
-    rm -rf /etc/hypr-mon-switch
     
     # Reload udev rules
     if command -v udevadm >/dev/null 2>&1; then
         udevadm control --reload-rules 2>/dev/null || true
     fi
     
-    echo "hypr-mon-switch-git has been completely removed."
+    echo "System integration removed."
     echo ""
+    echo "Note: Package files will be removed by pacman."
     echo "Note: Hyprland hooks in user config files were not automatically removed."
     echo "You may need to manually remove these lines from your Hyprland config:"
     echo "  exec-once = /etc/acpi/check-lid-on-startup.sh"
