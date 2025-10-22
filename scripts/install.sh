@@ -7,8 +7,17 @@ set -euo pipefail
 # Defaults (can be overridden by flags)
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
-REPO_ACPI_DIR="${REPO_ROOT}/acpi"
-REPO_CONFIGS_DIR="${REPO_ROOT}/configs"
+
+# Detect if running from package installation
+if [ -d "/usr/share/hypr-mon-switch" ] && [ -f "/etc/acpi/hypr-utils.sh" ]; then
+  # Running from package installation
+  REPO_ACPI_DIR="/etc/acpi"
+  REPO_CONFIGS_DIR="/etc/hypr-mon-switch"
+else
+  # Running from development directory
+  REPO_ACPI_DIR="${REPO_ROOT}/acpi"
+  REPO_CONFIGS_DIR="${REPO_ROOT}/configs"
+fi
 DEST_DIR="/etc/acpi"
 EVENTS_DIR="/etc/acpi/events"
 CONFIG_DIR="/etc/hypr-mon-switch"
@@ -113,46 +122,71 @@ install_file() {
 install_system() {
   mkdir -p "$DEST_DIR" "$EVENTS_DIR" "$CONFIG_DIR"
 
-  # Install ACPI scripts
-  backup_if_changed "$REPO_ACPI_DIR/hypr-utils.sh" "$DEST_DIR/hypr-utils.sh"
-  install_file      "$REPO_ACPI_DIR/hypr-utils.sh" "$DEST_DIR/hypr-utils.sh" 0755
-
-  backup_if_changed "$REPO_ACPI_DIR/lid-open.sh" "$DEST_DIR/lid-open.sh"
-  install_file      "$REPO_ACPI_DIR/lid-open.sh"  "$DEST_DIR/lid-open.sh"  0755
-
-  backup_if_changed "$REPO_ACPI_DIR/lid-close.sh" "$DEST_DIR/lid-close.sh"
-  install_file      "$REPO_ACPI_DIR/lid-close.sh" "$DEST_DIR/lid-close.sh" 0755
-
-  backup_if_changed "$REPO_ACPI_DIR/check-lid-on-startup.sh" "$DEST_DIR/check-lid-on-startup.sh"
-  install_file      "$REPO_ACPI_DIR/check-lid-on-startup.sh" "$DEST_DIR/check-lid-on-startup.sh" 0755
-
-  backup_if_changed "$REPO_ACPI_DIR/monitor-hotplug.sh" "$DEST_DIR/monitor-hotplug.sh"
-  install_file      "$REPO_ACPI_DIR/monitor-hotplug.sh" "$DEST_DIR/monitor-hotplug.sh" 0755
-  
-  # Create symlink for monitor-hotplug-config.sh
-  if [ "$DRY_RUN" = 1 ]; then
-    say "Would create symlink: $DEST_DIR/monitor-hotplug-config.sh -> $DEST_DIR/monitor-hotplug.sh"
+  # Check if running from package installation (files already in /etc/acpi/)
+  if [ -f "$DEST_DIR/hypr-utils.sh" ] && [ -f "$DEST_DIR/monitor-hotplug.sh" ]; then
+    say "ACPI scripts already installed in $DEST_DIR"
+    # Just create the symlink if it doesn't exist
+    if [ ! -L "$DEST_DIR/monitor-hotplug-config.sh" ]; then
+      if [ "$DRY_RUN" = 1 ]; then
+        say "Would create symlink: $DEST_DIR/monitor-hotplug-config.sh -> $DEST_DIR/monitor-hotplug.sh"
+      else
+        ln -sf "$DEST_DIR/monitor-hotplug.sh" "$DEST_DIR/monitor-hotplug-config.sh"
+      fi
+    fi
   else
-    ln -sf "$DEST_DIR/monitor-hotplug.sh" "$DEST_DIR/monitor-hotplug-config.sh"
+    # Running from development directory - install ACPI scripts
+    backup_if_changed "$REPO_ACPI_DIR/hypr-utils.sh" "$DEST_DIR/hypr-utils.sh"
+    install_file      "$REPO_ACPI_DIR/hypr-utils.sh" "$DEST_DIR/hypr-utils.sh" 0755
+
+    backup_if_changed "$REPO_ACPI_DIR/lid-open.sh" "$DEST_DIR/lid-open.sh"
+    install_file      "$REPO_ACPI_DIR/lid-open.sh"  "$DEST_DIR/lid-open.sh"  0755
+
+    backup_if_changed "$REPO_ACPI_DIR/lid-close.sh" "$DEST_DIR/lid-close.sh"
+    install_file      "$REPO_ACPI_DIR/lid-close.sh" "$DEST_DIR/lid-close.sh" 0755
+
+    backup_if_changed "$REPO_ACPI_DIR/check-lid-on-startup.sh" "$DEST_DIR/check-lid-on-startup.sh"
+    install_file      "$REPO_ACPI_DIR/check-lid-on-startup.sh" "$DEST_DIR/check-lid-on-startup.sh" 0755
+
+    backup_if_changed "$REPO_ACPI_DIR/monitor-hotplug.sh" "$DEST_DIR/monitor-hotplug.sh"
+    install_file      "$REPO_ACPI_DIR/monitor-hotplug.sh" "$DEST_DIR/monitor-hotplug.sh" 0755
+    
+    # Create symlink for monitor-hotplug-config.sh
+    if [ "$DRY_RUN" = 1 ]; then
+      say "Would create symlink: $DEST_DIR/monitor-hotplug-config.sh -> $DEST_DIR/monitor-hotplug.sh"
+    else
+      ln -sf "$DEST_DIR/monitor-hotplug.sh" "$DEST_DIR/monitor-hotplug-config.sh"
+    fi
   fi
 
   # Install config parser to both locations for compatibility
-  backup_if_changed "$REPO_ROOT/scripts/config-parser.sh" "$DEST_DIR/config-parser.sh"
-  install_file      "$REPO_ROOT/scripts/config-parser.sh" "$DEST_DIR/config-parser.sh" 0755
+  if [ -f "$DEST_DIR/config-parser.sh" ]; then
+    say "Config parser already installed in $DEST_DIR"
+  else
+    backup_if_changed "$REPO_ROOT/scripts/config-parser.sh" "$DEST_DIR/config-parser.sh"
+    install_file      "$REPO_ROOT/scripts/config-parser.sh" "$DEST_DIR/config-parser.sh" 0755
+  fi
   
   # Also install to config directory for hypr-utils.sh compatibility
-  backup_if_changed "$REPO_ROOT/scripts/config-parser.sh" "$CONFIG_DIR/config-parser.sh"
-  install_file      "$REPO_ROOT/scripts/config-parser.sh" "$CONFIG_DIR/config-parser.sh" 0755
+  if [ -f "$CONFIG_DIR/config-parser.sh" ]; then
+    say "Config parser already installed in $CONFIG_DIR"
+  else
+    backup_if_changed "$REPO_ROOT/scripts/config-parser.sh" "$CONFIG_DIR/config-parser.sh"
+    install_file      "$REPO_ROOT/scripts/config-parser.sh" "$CONFIG_DIR/config-parser.sh" 0755
+  fi
 
   # Install configuration files
-  local config_file="${CONFIG_FILE:-example-config.yaml}"
-  if [ -f "$REPO_CONFIGS_DIR/$config_file" ]; then
-    backup_if_changed "$REPO_CONFIGS_DIR/$config_file" "$CONFIG_DIR/config.yaml"
-    install_file      "$REPO_CONFIGS_DIR/$config_file" "$CONFIG_DIR/config.yaml" 0644
+  if [ -f "$CONFIG_DIR/config.yaml" ]; then
+    say "Configuration file already installed in $CONFIG_DIR"
   else
-    say "Warning: Configuration file $config_file not found in $REPO_CONFIGS_DIR"
-    say "Available configs:"
-    ls -1 "$REPO_CONFIGS_DIR"/*.yaml 2>/dev/null || say "  (none found)"
+    local config_file="${CONFIG_FILE:-example-config.yaml}"
+    if [ -f "$REPO_CONFIGS_DIR/$config_file" ]; then
+      backup_if_changed "$REPO_CONFIGS_DIR/$config_file" "$CONFIG_DIR/config.yaml"
+      install_file      "$REPO_CONFIGS_DIR/$config_file" "$CONFIG_DIR/config.yaml" 0644
+    else
+      say "Warning: Configuration file $config_file not found in $REPO_CONFIGS_DIR"
+      say "Available configs:"
+      ls -1 "$REPO_CONFIGS_DIR"/*.yaml 2>/dev/null || say "  (none found)"
+    fi
   fi
 
   # Install all example configs
