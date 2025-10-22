@@ -22,7 +22,9 @@ package() {
     # Create system directories
     install -d "$pkgdir/etc/hypr-mon-switch"
     install -d "$pkgdir/usr/share/hypr-mon-switch/scripts"
+    install -d "$pkgdir/usr/share/hypr-mon-switch/udev"
     install -d "$pkgdir/usr/share/doc/hypr-mon-switch"
+    install -d "$pkgdir/usr/share/licenses/hypr-mon-switch-git"
     
     # Install ACPI scripts to system location
     install -Dm755 acpi/hypr-utils.sh "$pkgdir/etc/acpi/hypr-utils.sh"
@@ -66,13 +68,67 @@ post_install() {
     echo "Example config: /etc/hypr-mon-switch/example-config.yaml"
     echo "Documentation: /usr/share/doc/hypr-mon-switch/INSTALLATION.md"
     echo ""
-    echo "To complete setup, run:"
-    echo "  sudo /usr/share/hypr-mon-switch/scripts/install.sh"
+    echo "Setting up system integration..."
+    
+    # Create necessary directories
+    mkdir -p /etc/acpi/events
+    mkdir -p /etc/udev/rules.d
+    
+    # Create symlink for monitor-hotplug-config.sh
+    ln -sf /etc/acpi/monitor-hotplug.sh /etc/acpi/monitor-hotplug-config.sh
+    
+    # Create ACPI events
+    cat > /etc/acpi/events/lid-close << 'EOF'
+event=button/lid.*close
+action=/etc/acpi/lid-close.sh
+EOF
+    
+    cat > /etc/acpi/events/lid-open << 'EOF'
+event=button/lid.*open
+action=/etc/acpi/lid-open.sh
+EOF
+    
+    # Create udev rule for monitor hotplug
+    TARGET_USER="${SUDO_USER:-$(logname 2>/dev/null || echo "${USER:-}")}"
+    if [ -n "$TARGET_USER" ] && [ "$TARGET_USER" != "root" ]; then
+        cat > /etc/udev/rules.d/99-monitor-hotplug.rules << EOF
+# Monitor hotplug rule for hypr-mon-switch
+# Triggers monitor layout changes when displays are connected/disconnected
+ACTION=="change", SUBSYSTEM=="drm", RUN+="/bin/su $TARGET_USER -c '/etc/acpi/monitor-hotplug-config.sh'"
+EOF
+    else
+        cat > /etc/udev/rules.d/99-monitor-hotplug.rules << 'EOF'
+# Monitor hotplug rule for hypr-mon-switch
+# Triggers monitor layout changes when displays are connected/disconnected
+ACTION=="change", SUBSYSTEM=="drm", RUN+="/etc/acpi/monitor-hotplug-config.sh"
+EOF
+    fi
+    
+    # Create log file
+    touch /var/log/hypr-mon-switch.log
+    chmod 666 /var/log/hypr-mon-switch.log
+    
+    # Reload udev rules
+    if command -v udevadm >/dev/null 2>&1; then
+        udevadm control --reload-rules 2>/dev/null || true
+        udevadm trigger -s drm 2>/dev/null || true
+    fi
+    
+    # Restart acpid if available
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl restart acpid 2>/dev/null || true
+    fi
+    
+    echo "System integration complete!"
+    echo ""
+    echo "The system will automatically detect monitor changes and apply the best matching configuration."
     echo ""
     echo "To uninstall completely:"
     echo "  sudo /usr/share/hypr-mon-switch/scripts/uninstall.sh"
     echo ""
-    echo "The system will automatically detect monitor changes and apply the best matching configuration."
+    echo "Note: You may need to add these lines to your Hyprland config for full functionality:"
+    echo "  exec-once = /etc/acpi/check-lid-on-startup.sh"
+    echo "  exec = /etc/acpi/check-lid-on-startup.sh"
 }
 
 post_remove() {
